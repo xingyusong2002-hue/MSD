@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chromatic Echoes — Multiplayer Color Mixing</title>
+    <meta name="description"
+        content="A cooperative multiplayer experience where players mix colors through sound to match target colors">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <canvas id="rippleCanvas"></canvas>
+
+    <!-- ===== SCREEN: Landing ===== -->
+    <div id="screenLanding" class="screen active">
+        <div class="screen-content">
+            <h1 class="title">Chromatic Echoes</h1>
+            <p class="subtitle">A cooperative sound & color experience</p>
+            <div class="landing-buttons">
+                <button id="btnHost" class="btn btn-primary">
+                    <span class="btn-icon">👁️</span>
+                    <span class="btn-text">Start as Host</span>
+                </button>
+                <button id="btnJoin" class="btn btn-secondary">
+                    <span class="btn-icon">🎤</span>
+                    <span class="btn-text">Join Game</span>
+                </button>
+            </div>
+            <p class="hint">Host controls the game · Players create color with sound</p>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Role Selection ===== -->
+    <div id="screenRoles" class="screen">
+        <div class="screen-content">
+            <h2 class="screen-title">Choose Your Color</h2>
+            <p class="screen-subtitle">Pick a color channel to control with your voice</p>
+            <div class="role-cards">
+                <button id="roleRed" class="role-card role-red" data-role="red">
+                    <div class="role-orb"></div>
+                    <span class="role-name">Red</span>
+                    <span class="role-status">Available</span>
+                </button>
+                <button id="roleGreen" class="role-card role-green" data-role="green">
+                    <div class="role-orb"></div>
+                    <span class="role-name">Green</span>
+                    <span class="role-status">Available</span>
+                </button>
+                <button id="roleBlue" class="role-card role-blue" data-role="blue">
+                    <div class="role-orb"></div>
+                    <span class="role-name">Blue</span>
+                    <span class="role-status">Available</span>
+                </button>
+            </div>
+            <button id="btnBackToLanding" class="btn btn-ghost">← Back</button>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Lobby (Host) ===== -->
+    <div id="screenLobby" class="screen">
+        <div class="screen-content">
+            <h2 class="screen-title">Waiting for Players</h2>
+            <p class="screen-subtitle">Share the URL with your teammates</p>
+            <div id="lobbyUrl" class="lobby-url"></div>
+
+            <!-- Mode Selector -->
+            <div class="mode-selector">
+                <span class="mode-label">Game Mode</span>
+                <div class="mode-options">
+                    <button id="modeLive" class="mode-btn active" data-mode="live">
+                        <span class="mode-icon">⚡</span>
+                        <span class="mode-name">Live Mix</span>
+                        <span class="mode-desc">Match the ratio in real-time</span>
+                    </button>
+                    <button id="modeAccumulate" class="mode-btn" data-mode="accumulate">
+                        <span class="mode-icon">🫧</span>
+                        <span class="mode-name">Fill Mode</span>
+                        <span class="mode-desc">Particles collect &amp; build up color</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="lobby-players">
+                <div id="lobbyRed" class="lobby-slot lobby-slot-red">
+                    <div class="lobby-orb"></div>
+                    <span class="lobby-label">Red</span>
+                    <span class="lobby-state">Waiting...</span>
+                </div>
+                <div id="lobbyGreen" class="lobby-slot lobby-slot-green">
+                    <div class="lobby-orb"></div>
+                    <span class="lobby-label">Green</span>
+                    <span class="lobby-state">Waiting...</span>
+                </div>
+                <div id="lobbyBlue" class="lobby-slot lobby-slot-blue">
+                    <div class="lobby-orb"></div>
+                    <span class="lobby-label">Blue</span>
+                    <span class="lobby-state">Waiting...</span>
+                </div>
+            </div>
+            <button id="btnStartRound" class="btn btn-primary btn-glow" disabled>
+                <span class="btn-text">Start Round</span>
+            </button>
+            <p class="hint" id="lobbyHint">At least one player must join</p>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Player Waiting ===== -->
+    <div id="screenPlayerWait" class="screen">
+        <div class="screen-content">
+            <h2 class="screen-title">You are <span id="playerColorLabel" class="color-label">—</span></h2>
+            <p class="screen-subtitle">Waiting for the host to start the round...</p>
+            <div class="pulse-ring" id="waitPulse"></div>
+            <p id="playerModeHint" class="mode-hint"></p>
+        </div>
+    </div>
+
+    <!-- ===== GAME HUD ===== -->
+    <div id="gameHud" class="game-hud hidden">
+        <!-- Mode badge (top left) -->
+        <div id="modeBadge" class="mode-badge">
+            <span id="modeBadgeIcon">⚡</span>
+            <span id="modeBadgeName">Live Mix</span>
+        </div>
+
+        <!-- Target color (top center) -->
+        <div id="targetDisplay" class="target-display">
+            <span class="target-label">TARGET</span>
+            <div id="targetSwatch" class="target-swatch"></div>
+            <span id="targetName" class="target-name">—</span>
+            <div class="target-breakdown">
+                <span class="tb-r">R: <b id="targetR">0</b>%</span>
+                <span class="tb-g">G: <b id="targetG">0</b>%</span>
+                <span class="tb-b">B: <b id="targetB">0</b>%</span>
+            </div>
+        </div>
+
+        <!-- Mixing box (center) -->
+        <div id="mixingBox" class="mixing-box">
+            <div id="mixingFill" class="mixing-fill"></div>
+            <div class="mixing-percentages">
+                <span class="mp-r">R: <b id="mixR">0</b>%</span>
+                <span class="mp-g">G: <b id="mixG">0</b>%</span>
+                <span class="mp-b">B: <b id="mixB">0</b>%</span>
+            </div>
+            <div id="matchProgress" class="match-progress">
+                <div id="matchProgressBar" class="match-progress-bar"></div>
+            </div>
+        </div>
+
+        <!-- Player volume bars (bottom) -->
+        <div class="player-bars">
+            <div class="pbar pbar-red">
+                <span class="pbar-label">🔴 Red</span>
+                <div class="pbar-track">
+                    <div id="barRed" class="pbar-fill pbar-fill-red"></div>
+                </div>
+                <span id="barRedVal" class="pbar-val">0%</span>
+            </div>
+            <div class="pbar pbar-green">
+                <span class="pbar-label">🟢 Green</span>
+                <div class="pbar-track">
+                    <div id="barGreen" class="pbar-fill pbar-fill-green"></div>
+                </div>
+                <span id="barGreenVal" class="pbar-val">0%</span>
+            </div>
+            <div class="pbar pbar-blue">
+                <span class="pbar-label">🔵 Blue</span>
+                <div class="pbar-track">
+                    <div id="barBlue" class="pbar-fill pbar-fill-blue"></div>
+                </div>
+                <span id="barBlueVal" class="pbar-val">0%</span>
+            </div>
+        </div>
+
+        <!-- Round indicator -->
+        <div id="roundBadge" class="round-badge">
+            Round <span id="roundNum">1</span> / <span id="roundTotal">5</span>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Success ===== -->
+    <div id="screenSuccess" class="screen">
+        <div class="screen-content">
+            <div class="success-burst"></div>
+            <h2 class="success-title">🎉 Color Matched!</h2>
+            <p id="successColorName" class="success-color">—</p>
+            <div id="successSwatch" class="success-swatch"></div>
+            <div id="successButtons" class="success-buttons">
+                <button id="btnNextRound" class="btn btn-primary btn-glow">
+                    <span class="btn-text">Next Color →</span>
+                </button>
+            </div>
+            <p id="successHint" class="hint"></p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

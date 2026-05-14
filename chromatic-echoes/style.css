@@ -1,0 +1,1000 @@
+/* ============================================
+   Chromatic Echoes — Multiplayer Stylesheet
+   Two modes: Live Mix & Accumulate
+   ============================================ */
+
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --color-bg: #050508;
+    --color-surface: rgba(255, 255, 255, 0.04);
+    --color-surface-hover: rgba(255, 255, 255, 0.08);
+    --color-text: #e0e0e8;
+    --color-text-dim: rgba(255, 255, 255, 0.4);
+    --color-red: #ff3355;
+    --color-green: #33ff88;
+    --color-blue: #3388ff;
+    --color-red-dim: rgba(255, 51, 85, 0.3);
+    --color-green-dim: rgba(51, 255, 136, 0.3);
+    --color-blue-dim: rgba(51, 136, 255, 0.3);
+    --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --radius: 14px;
+    --radius-sm: 8px;
+    --radius-lg: 20px;
+    --glass-bg: rgba(10, 10, 18, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.06);
+    --glass-blur: blur(20px);
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--color-bg);
+    font-family: var(--font-main);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Canvas ---- */
+#rippleCanvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: var(--color-bg);
+}
+
+/* ---- Screen System ---- */
+.screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(8, 8, 16, 0.85) 0%, rgba(5, 5, 8, 0.98) 70%);
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+    backdrop-filter: var(--glass-blur);
+    overflow-y: auto;
+}
+
+.screen.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.screen-content {
+    text-align: center;
+    animation: fadeInUp 0.8s ease forwards;
+    max-width: 640px;
+    padding: 20px;
+}
+
+/* ---- Title ---- */
+.title {
+    font-size: clamp(2.2rem, 6vw, 4.2rem);
+    font-weight: 300;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, var(--color-red), var(--color-blue), var(--color-green));
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradientShift 4s ease infinite;
+    margin-bottom: 0.4em;
+}
+
+.subtitle {
+    font-size: 1.05rem;
+    font-weight: 300;
+    color: var(--color-text-dim);
+    letter-spacing: 0.06em;
+    margin-bottom: 2.5em;
+}
+
+.screen-title {
+    font-size: clamp(1.5rem, 4vw, 2.4rem);
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.3em;
+    color: var(--color-text);
+}
+
+.screen-subtitle {
+    font-size: 0.95rem;
+    font-weight: 300;
+    color: var(--color-text-dim);
+    letter-spacing: 0.04em;
+    margin-bottom: 2em;
+}
+
+/* ---- Buttons ---- */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 36px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 60px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-family: var(--font-main);
+    font-size: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.btn:hover {
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px);
+}
+
+.btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-primary::before {
+    background: linear-gradient(135deg, var(--color-red), var(--color-blue));
+}
+
+.btn-primary:hover::before {
+    opacity: 0.2;
+}
+
+.btn-primary:hover {
+    box-shadow: 0 8px 32px rgba(255, 50, 100, 0.15);
+}
+
+.btn-secondary::before {
+    background: linear-gradient(135deg, var(--color-green), var(--color-blue));
+}
+
+.btn-secondary:hover::before {
+    opacity: 0.15;
+}
+
+.btn-secondary:hover {
+    box-shadow: 0 8px 32px rgba(51, 255, 136, 0.1);
+}
+
+.btn-ghost {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.08);
+    font-size: 0.85rem;
+    padding: 10px 24px;
+    margin-top: 1.5em;
+}
+
+.btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.btn-glow {
+    animation: btnGlow 2s ease-in-out infinite;
+}
+
+.btn .btn-icon {
+    font-size: 1.2rem;
+    position: relative;
+    z-index: 1;
+}
+
+.btn .btn-text {
+    position: relative;
+    z-index: 1;
+}
+
+.hint {
+    margin-top: 1.5em;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.04em;
+}
+
+/* ---- Landing Buttons ---- */
+.landing-buttons {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* ---- Role Selection ---- */
+.role-cards {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 1em;
+}
+
+.role-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 28px 32px;
+    border-radius: var(--radius-lg);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    cursor: pointer;
+    transition: all 0.35s ease;
+    min-width: 130px;
+    font-family: var(--font-main);
+    color: var(--color-text);
+}
+
+.role-card:hover:not(:disabled) {
+    transform: translateY(-4px) scale(1.03);
+}
+
+.role-card:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.role-orb {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    transition: box-shadow 0.3s ease;
+}
+
+.role-red .role-orb {
+    background: var(--color-red);
+    box-shadow: 0 0 30px var(--color-red-dim);
+}
+
+.role-red:hover:not(:disabled) .role-orb {
+    box-shadow: 0 0 50px var(--color-red);
+}
+
+.role-green .role-orb {
+    background: var(--color-green);
+    box-shadow: 0 0 30px var(--color-green-dim);
+}
+
+.role-green:hover:not(:disabled) .role-orb {
+    box-shadow: 0 0 50px var(--color-green);
+}
+
+.role-blue .role-orb {
+    background: var(--color-blue);
+    box-shadow: 0 0 30px var(--color-blue-dim);
+}
+
+.role-blue:hover:not(:disabled) .role-orb {
+    box-shadow: 0 0 50px var(--color-blue);
+}
+
+.role-name {
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+}
+
+.role-status {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.role-card.taken .role-status {
+    color: var(--color-red);
+}
+
+/* ---- Mode Selector ---- */
+.mode-selector {
+    margin-bottom: 2em;
+}
+
+.mode-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-text-dim);
+    margin-bottom: 12px;
+}
+
+.mode-options {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.mode-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 18px 28px;
+    border-radius: var(--radius);
+    background: var(--glass-bg);
+    border: 2px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 160px;
+    font-family: var(--font-main);
+    color: var(--color-text);
+}
+
+.mode-btn:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+}
+
+.mode-btn.active {
+    border-color: var(--color-blue);
+    background: rgba(51, 136, 255, 0.08);
+    box-shadow: 0 0 20px rgba(51, 136, 255, 0.1);
+}
+
+.mode-icon {
+    font-size: 1.6rem;
+}
+
+.mode-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+}
+
+.mode-desc {
+    font-size: 0.68rem;
+    color: var(--color-text-dim);
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+}
+
+.mode-hint {
+    margin-top: 1em;
+    font-size: 0.85rem;
+    color: var(--color-text-dim);
+    letter-spacing: 0.03em;
+    font-style: italic;
+}
+
+/* ---- Mode Badge (in-game) ---- */
+.mode-badge {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: 40px;
+    padding: 8px 16px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim);
+    z-index: 60;
+}
+
+/* ---- Lobby ---- */
+.lobby-url {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 12px 20px;
+    font-size: 0.85rem;
+    font-family: monospace;
+    color: var(--color-text-dim);
+    margin-bottom: 1.5em;
+    letter-spacing: 0.02em;
+    user-select: all;
+    word-break: break-all;
+}
+
+.lobby-players {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 2em;
+}
+
+.lobby-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 20px 28px;
+    border-radius: var(--radius);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    min-width: 110px;
+    transition: all 0.4s ease;
+}
+
+.lobby-slot.connected {
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.lobby-orb {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    opacity: 0.25;
+    transition: all 0.4s ease;
+}
+
+.lobby-slot.connected .lobby-orb {
+    opacity: 1;
+    animation: orbPulse 2s ease-in-out infinite;
+}
+
+.lobby-slot-red .lobby-orb {
+    background: var(--color-red);
+}
+
+.lobby-slot-green .lobby-orb {
+    background: var(--color-green);
+}
+
+.lobby-slot-blue .lobby-orb {
+    background: var(--color-blue);
+}
+
+.lobby-slot.connected.lobby-slot-red {
+    border-color: var(--color-red-dim);
+}
+
+.lobby-slot.connected.lobby-slot-green {
+    border-color: var(--color-green-dim);
+}
+
+.lobby-slot.connected.lobby-slot-blue {
+    border-color: var(--color-blue-dim);
+}
+
+.lobby-label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+}
+
+.lobby-state {
+    font-size: 0.7rem;
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    transition: color 0.3s ease;
+}
+
+.lobby-slot.connected .lobby-state {
+    color: var(--color-green);
+}
+
+/* ---- Player Wait Screen ---- */
+.color-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.color-label.red {
+    color: var(--color-red);
+}
+
+.color-label.green {
+    color: var(--color-green);
+}
+
+.color-label.blue {
+    color: var(--color-blue);
+}
+
+.pulse-ring {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    margin: 2em auto;
+    animation: pulseRing 2s ease-in-out infinite;
+    opacity: 0.5;
+}
+
+.pulse-ring.red {
+    border: 2px solid var(--color-red);
+    box-shadow: 0 0 40px var(--color-red-dim);
+}
+
+.pulse-ring.green {
+    border: 2px solid var(--color-green);
+    box-shadow: 0 0 40px var(--color-green-dim);
+}
+
+.pulse-ring.blue {
+    border: 2px solid var(--color-blue);
+    box-shadow: 0 0 40px var(--color-blue-dim);
+}
+
+/* ---- Game HUD ---- */
+.game-hud {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+}
+
+.game-hud.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.game-hud>* {
+    pointer-events: auto;
+}
+
+/* Target Display */
+.target-display {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: 60px;
+    padding: 10px 24px;
+    z-index: 60;
+}
+
+.target-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-text-dim);
+}
+
+.target-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    transition: background-color 0.3s ease;
+}
+
+.target-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--color-text);
+}
+
+.target-breakdown {
+    display: flex;
+    gap: 10px;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+}
+
+.tb-r {
+    color: var(--color-red);
+}
+
+.tb-g {
+    color: var(--color-green);
+}
+
+.tb-b {
+    color: var(--color-blue);
+}
+
+.tb-r b,
+.tb-g b,
+.tb-b b {
+    font-weight: 600;
+}
+
+/* Mixing Box */
+.mixing-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 180px;
+    height: 180px;
+    border-radius: var(--radius-lg);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    z-index: 55;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* In accumulate mode, the box has a more solid, vessel-like appearance */
+.mixing-box.accumulate-mode {
+    border-width: 3px;
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.mixing-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0.5;
+    transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+/* In accumulate mode the fill is more opaque / solid looking */
+.mixing-box.accumulate-mode .mixing-fill {
+    opacity: 0.75;
+}
+
+.mixing-percentages {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.mp-r {
+    color: var(--color-red);
+}
+
+.mp-g {
+    color: var(--color-green);
+}
+
+.mp-b {
+    color: var(--color-blue);
+}
+
+.mp-r b,
+.mp-g b,
+.mp-b b {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+/* Match progress at bottom of mixing box */
+.match-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    z-index: 3;
+}
+
+.match-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--color-green), #fff);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    transition: width 0.1s linear;
+}
+
+/* Player Bars (bottom) */
+.player-bars {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 16px;
+    z-index: 60;
+}
+
+.pbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: 40px;
+    padding: 8px 18px;
+    min-width: 170px;
+}
+
+.pbar-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    min-width: 58px;
+    white-space: nowrap;
+}
+
+.pbar-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.pbar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    transition: width 0.08s ease-out;
+}
+
+.pbar-fill-red {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), var(--color-red));
+}
+
+.pbar-fill-green {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), var(--color-green));
+}
+
+.pbar-fill-blue {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), var(--color-blue));
+}
+
+.pbar-val {
+    font-size: 0.72rem;
+    color: var(--color-text-dim);
+    font-variant-numeric: tabular-nums;
+    min-width: 32px;
+    text-align: right;
+}
+
+/* Round badge */
+.round-badge {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: 40px;
+    padding: 8px 18px;
+    font-size: 0.72rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim);
+    z-index: 60;
+}
+
+/* ---- Success Screen ---- */
+.success-title {
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    font-weight: 300;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.5em;
+    animation: successPop 0.6s ease forwards;
+}
+
+.success-color {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--color-text);
+    letter-spacing: 0.06em;
+    margin-bottom: 1em;
+}
+
+.success-swatch {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    margin: 0 auto 1.5em;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 60px rgba(255, 255, 255, 0.15);
+    animation: swatchGlow 2s ease-in-out infinite;
+}
+
+.success-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.success-burst {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+    animation: burstFade 1.5s ease forwards;
+    pointer-events: none;
+}
+
+/* ---- Animations ---- */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes gradientShift {
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+@keyframes btnGlow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 15px rgba(255, 50, 100, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 30px rgba(255, 50, 100, 0.25);
+    }
+}
+
+@keyframes orbPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.15);
+    }
+}
+
+@keyframes pulseRing {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.4;
+    }
+
+    50% {
+        transform: scale(1.3);
+        opacity: 0.7;
+    }
+}
+
+@keyframes successPop {
+    0% {
+        transform: scale(0.8);
+        opacity: 0;
+    }
+
+    60% {
+        transform: scale(1.05);
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes swatchGlow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);
+    }
+
+    50% {
+        box-shadow: 0 0 80px rgba(255, 255, 255, 0.25);
+    }
+}
+
+@keyframes burstFade {
+    from {
+        opacity: 1;
+        transform: scale(0.5);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(2);
+    }
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 700px) {
+    .target-display {
+        flex-wrap: wrap;
+        justify-content: center;
+        border-radius: var(--radius);
+        padding: 10px 16px;
+        gap: 8px;
+    }
+
+    .player-bars {
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .pbar {
+        min-width: 260px;
+    }
+
+    .role-cards {
+        gap: 12px;
+    }
+
+    .role-card {
+        padding: 20px 24px;
+        min-width: 100px;
+    }
+
+    .mixing-box {
+        width: 140px;
+        height: 140px;
+    }
+
+    .lobby-players {
+        gap: 10px;
+    }
+
+    .mode-options {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .mode-btn {
+        min-width: 220px;
+    }
+}
