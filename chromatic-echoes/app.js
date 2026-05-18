@@ -280,12 +280,18 @@
 
         // Stage-aware routing. The outer museum walkthrough decides which screen we're on.
         // Only inside the 'dead-room' stage does the inner phase machine choose the screen.
+        // Important: until the user has chosen a role (host or player) on the Landing
+        // screen, we do NOT auto-route. The server's default stage is 'waiting-room',
+        // so without this guard the Landing screen would be replaced before the visitor
+        // ever sees the host/join choice.
         const stageToolbarShouldShow = myRole === 'host' && experienceStage === 'dead-room';
         stageToolbar.classList.toggle('hidden', !stageToolbarShouldShow);
         stageToolbarBtns.forEach(b => b.classList.toggle('active', b.dataset.stage === experienceStage));
         toggleHostStageControls();
 
-        if (experienceStage === 'waiting-room') {
+        if (!myRole) {
+            // No role yet — keep them on the Landing screen so they can choose.
+        } else if (experienceStage === 'waiting-room') {
             showGameHud(false); stopRenderLoop();
             showScreen('waitingRoom');
         } else if (experienceStage === 'threshold') {
@@ -329,6 +335,19 @@
         hostWaitingControls.classList.toggle('hidden', !isHost);
         hostThresholdControls.classList.toggle('hidden', !isHost);
         hostArchiveControls.classList.toggle('hidden', !isHost);
+        // Hints — role-aware so the host knows they hold the advance button.
+        const wHint = document.getElementById('waitingHint');
+        const tHint = document.getElementById('thresholdHint');
+        const aHint = document.getElementById('archiveHint');
+        if (wHint) wHint.textContent = isHost
+            ? 'You are the host — open the doors when the group is ready.'
+            : 'Waiting for the host to begin…';
+        if (tHint) tHint.textContent = isHost
+            ? 'Lead the group inside when everyone is ready.'
+            : 'Waiting for the host…';
+        if (aHint) aHint.textContent = isHost
+            ? 'Thank visitors and start a new session when ready.'
+            : 'Thank you for visiting the Dead Room.';
     }
 
     function updateFrame(f) {

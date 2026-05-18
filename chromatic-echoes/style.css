@@ -1011,6 +1011,19 @@ body {
    Museum Walkthrough (Step 1 scaffolding)
    ============================================ */
 
+/* Waiting Room — interior photo of the TU Delft Dead Room as the backdrop.
+   Stack order (top → bottom):
+     1. dark overlay so the copy stays legible
+     2. the photo
+     3. an earthy-brown fallback that matches the photo's palette when the file
+        isn't yet on disk (image is committed separately by the user). */
+#screenWaitingRoom {
+    background:
+        radial-gradient(ellipse at center, rgba(8, 8, 16, 0.45) 0%, rgba(5, 5, 8, 0.92) 80%),
+        url('assets/dead-room-interior.jpg') center/cover no-repeat,
+        #2a1f17;
+}
+
 /* Generic visibility helper (the existing one is scoped to .game-hud). */
 .hidden { display: none !important; }
 
