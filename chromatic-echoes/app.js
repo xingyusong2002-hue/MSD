@@ -58,6 +58,9 @@
     const barBlueVal = document.getElementById('barBlueVal');
     const roundNum = document.getElementById('roundNum');
     const roundTotal = document.getElementById('roundTotal');
+    const roundKindTag = document.getElementById('roundKindTag');
+    const roundInstructionText = document.getElementById('roundInstructionText');
+    const btnEndRound = document.getElementById('btnEndRound');
     const successColorName = document.getElementById('successColorName');
     const successSwatch = document.getElementById('successSwatch');
     const btnNextRound = document.getElementById('btnNextRound');
@@ -68,7 +71,11 @@
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
+    let currentRound = null;
     let audioCtx, analyser, timeDomainData;
+
+    // Human-readable labels used on the HUD instruction strip.
+    const KIND_LABELS = { solo: 'Solo Echo', move: 'Move Echo', mix: 'Mix Echo', silent: 'Silent Echo' };
     let animationId = null, time = 0;
     let smoothVolumes = { red: 0, green: 0, blue: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
@@ -298,6 +305,22 @@
             }
         }
 
+        // Round library: keep the HUD's data-kind in sync, fill the instruction strip,
+        // and decide whether the host's "End round" button is relevant.
+        if (s.round) {
+            currentRound = s.round;
+            gameHud.dataset.kind = currentRound.kind;
+            if (roundKindTag) roundKindTag.textContent = KIND_LABELS[currentRound.kind] || currentRound.kind;
+            if (roundInstructionText) roundInstructionText.textContent = currentRound.instruction || '';
+        }
+        if (btnEndRound) {
+            const showEnd = myRole === 'host'
+                && experienceStage === 'dead-room'
+                && s.phase === 'playing'
+                && currentRound && currentRound.kind !== 'mix';
+            btnEndRound.classList.toggle('hidden', !showEnd);
+        }
+
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
     }
 
@@ -310,6 +333,7 @@
 
     function updateFrame(f) {
         gameMode = f.mode || gameMode;
+        const kind = f.kind || (currentRound && currentRound.kind) || 'mix';
 
         for (const c of ['red', 'green', 'blue']) {
             const t = f.volumes[c] || 0;
@@ -319,6 +343,10 @@
         const rv = Math.round(smoothVolumes.red * 100), gv = Math.round(smoothVolumes.green * 100), bv = Math.round(smoothVolumes.blue * 100);
         barRed.style.width = rv + '%'; barGreen.style.width = gv + '%'; barBlue.style.width = bv + '%';
         barRedVal.textContent = rv + '%'; barGreenVal.textContent = gv + '%'; barBlueVal.textContent = bv + '%';
+
+        // Mix-only: target box, mixing fill, match-progress border. CSS hides these
+        // elements for other kinds, but skipping the DOM writes avoids flicker too.
+        if (kind !== 'mix') return;
 
         const mix = f.currentMix;
         mixR.textContent = mix.r; mixG.textContent = mix.g; mixB.textContent = mix.b;
@@ -433,6 +461,7 @@
 
     btnStartRound.addEventListener('click', () => send({ type: 'start_round' }));
     btnNextRound.addEventListener('click', () => send({ type: 'next_round' }));
+    btnEndRound.addEventListener('click', () => send({ type: 'end_round' }));
 
     // Museum walkthrough — stage transitions (host only; server enforces the role check too)
     btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));

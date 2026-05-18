@@ -170,11 +170,17 @@
     </div>
 
     <!-- ===== GAME HUD ===== -->
-    <div id="gameHud" class="game-hud hidden">
+    <div id="gameHud" class="game-hud hidden" data-kind="mix">
         <!-- Mode badge (top left) -->
         <div id="modeBadge" class="mode-badge">
             <span id="modeBadgeIcon">⚡</span>
             <span id="modeBadgeName">Live Mix</span>
+        </div>
+
+        <!-- Per-round instruction strip -->
+        <div id="roundInstruction" class="round-instruction">
+            <span id="roundKindTag" class="round-kind-tag">Mix Echo</span>
+            <span id="roundInstructionText" class="round-instruction-text">—</span>
         </div>
 
         <!-- Target color (top center) -->
@@ -231,6 +237,11 @@
         <div id="roundBadge" class="round-badge">
             Round <span id="roundNum">1</span> / <span id="roundTotal">5</span>
         </div>
+
+        <!-- Host-only: force-end the current round (used for solo / move / silent kinds) -->
+        <button id="btnEndRound" class="btn btn-ghost btn-end-round hidden">
+            <span class="btn-text">End round</span>
+        </button>
     </div>
 
     <!-- ===== SCREEN: Archive (museum walkthrough stage 4) ===== -->

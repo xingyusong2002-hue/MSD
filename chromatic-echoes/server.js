@@ -24,13 +24,25 @@ const MIME = {
     '.ico': 'image/x-icon',
 };
 
-// ---- Target Colors (all channels > 0) ----
+// ---- Round Library (typed; one entry per round) ----
+// `kind` decides what UI the client renders and how the server ends the round:
+//   'solo'   — hear yourself; ends via host `end_round`.
+//   'move'   — directionality; ends via host `end_round`.
+//   'mix'    — co-create the target colour; ends automatically when the mix is held.
+//   'silent' — listen for micro-sounds; ends via host `end_round`.
 const ROUNDS = [
-    { name: 'Warm Purple', r: 40, g: 15, b: 45 },
-    { name: 'Teal',        r: 15, g: 45, b: 40 },
-    { name: 'Golden Yellow',r: 45, g: 40, b: 15 },
-    { name: 'Soft White',  r: 35, g: 35, b: 30 },
-    { name: 'Coral',       r: 50, g: 30, b: 20 },
+    { id: 'solo-1',   kind: 'solo',   title: 'Solo Echo',
+      instruction: 'Make a sound. Hear how it returns — or doesn’t.' },
+    { id: 'move-1',   kind: 'move',   title: 'Move Echo',
+      instruction: 'Step to a new position. Notice how your colour moves with you.' },
+    { id: 'mix-1',    kind: 'mix',    title: 'Mix Echo: Warm Purple',
+      instruction: 'Together, paint Warm Purple. Hold the mix.',
+      target: { name: 'Warm Purple', r: 40, g: 15, b: 45 } },
+    { id: 'silent-1', kind: 'silent', title: 'Silent Echo',
+      instruction: 'Listen. What is the room saying when no one speaks?' },
+    { id: 'mix-2',    kind: 'mix',    title: 'Mix Echo: Teal',
+      instruction: 'Now paint Teal together.',
+      target: { name: 'Teal', r: 15, g: 45, b: 40 } },
 ];
 
 // ---- Game State ----
@@ -72,8 +84,19 @@ function getConnectedPlayers() {
     return list;
 }
 
-function getCurrentTarget() {
+function getCurrentRound() {
     return game.rounds[game.roundIndex % game.rounds.length];
+}
+
+// Public round descriptor sent to clients; never includes the target for non-mix kinds.
+function getCurrentRoundPublic() {
+    const r = getCurrentRound();
+    return { id: r.id, kind: r.kind, title: r.title, instruction: r.instruction };
+}
+
+// Backwards-compatible target getter. Legacy clients still read state.target.
+function getCurrentTarget() {
+    return getCurrentRound().target || null;
 }
 
 // Compute current mix from LIVE volumes (Mode 1)
@@ -139,6 +162,7 @@ function broadcastState() {
         availableRoles: getAvailableRoles(),
         connectedPlayers: getConnectedPlayers(),
         hasHost: !!game.host,
+        round: getCurrentRoundPublic(),
         target,
         roundIndex: game.roundIndex,
         totalRounds: game.rounds.length,
@@ -191,16 +215,19 @@ function startGameLoop() {
             }
         }
 
-        const target = getCurrentTarget();
+        const current = getCurrentRound();
+        const target = current.target || null;
         const mix = computeCurrentMix();
 
-        if (checkMatch(mix, target, MATCH_TOLERANCE)) {
+        // Auto-success only applies to mix rounds. Solo / move / silent are ended
+        // by the host via 'end_round'.
+        if (current.kind === 'mix' && target && checkMatch(mix, target, MATCH_TOLERANCE)) {
             game.matchTimer++;
             if (game.matchTimer >= MATCH_HOLD_FRAMES) {
-                // SUCCESS!
                 game.phase = 'success';
                 broadcast({
                     type: 'success',
+                    round: getCurrentRoundPublic(),
                     color: target,
                     roundIndex: game.roundIndex,
                     hasNext: game.roundIndex < game.rounds.length - 1,
@@ -209,18 +236,18 @@ function startGameLoop() {
                 broadcastState();
                 return;
             }
-        } else {
+        } else if (current.kind === 'mix') {
             if (game.mode === 'live') {
                 game.matchTimer = Math.max(0, game.matchTimer - 2);
             } else {
-                // In accumulate mode, timer decays slower since you can't undo accumulation
                 game.matchTimer = Math.max(0, game.matchTimer - 1);
             }
         }
 
-        // Broadcast live frame
+        // Broadcast live frame (every kind gets one; the client decides what to render)
         broadcast({
             type: 'frame',
+            kind: current.kind,
             mode: game.mode,
             volumes: { ...game.volumes },
             accumulated: { ...game.accumulated },
@@ -327,6 +354,27 @@ wss.on('connection', (ws) => {
                 break;
             }
 
+            case 'end_round': {
+                if (ws._role !== 'host') return;
+                if (game.phase !== 'playing') return;
+                const current = getCurrentRound();
+                // Host-ended success is the right exit for non-mix kinds; mix rounds
+                // normally auto-end, but we allow host to force-end them too if needed.
+                game.phase = 'success';
+                broadcast({
+                    type: 'success',
+                    round: getCurrentRoundPublic(),
+                    color: current.target || null,
+                    roundIndex: game.roundIndex,
+                    hasNext: game.roundIndex < game.rounds.length - 1,
+                    mode: game.mode,
+                    endedBy: 'host',
+                });
+                broadcastState();
+                console.log(`Round ${game.roundIndex + 1} (${current.kind}) ended by host`);
+                break;
+            }
+
             case 'next_round': {
                 if (ws._role !== 'host') return;
                 if (game.phase === 'success') {
@@ -388,6 +436,7 @@ wss.on('connection', (ws) => {
         availableRoles: getAvailableRoles(),
         connectedPlayers: getConnectedPlayers(),
         hasHost: !!game.host,
+        round: getCurrentRoundPublic(),
         target: getCurrentTarget(),
         roundIndex: game.roundIndex,
         totalRounds: game.rounds.length,

@@ -1129,3 +1129,76 @@ body {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.18);
 }
+
+/* ============================================
+   Round Library (Step 2)
+   ============================================ */
+
+/* Per-round instruction strip (sits inside #gameHud near the top centre). */
+.round-instruction {
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 18px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    font-size: 0.9rem;
+    color: var(--color-text);
+    max-width: min(640px, 90vw);
+    pointer-events: none;
+}
+
+.round-kind-tag {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--color-text);
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    white-space: nowrap;
+}
+
+.round-instruction-text {
+    color: var(--color-text-dim);
+    font-weight: 300;
+    line-height: 1.4;
+}
+
+/* Host-only "End round" button, lives in the HUD next to the round badge. */
+.btn-end-round {
+    position: absolute;
+    bottom: 18px;
+    right: 18px;
+    padding: 8px 18px;
+    font-size: 0.85rem;
+    z-index: 2;
+}
+
+/* Per-kind HUD visibility. Mix is the unchanged default; the others hide the
+   target / mixing-box and lighten the player bars. */
+#gameHud[data-kind="solo"]   .target-display,
+#gameHud[data-kind="move"]   .target-display,
+#gameHud[data-kind="silent"] .target-display { display: none; }
+
+#gameHud[data-kind="solo"]   .mixing-box,
+#gameHud[data-kind="silent"] .mixing-box { display: none; }
+
+#gameHud[data-kind="silent"] .player-bars { opacity: 0.35; }
+
+/* During Silent Echo, soften the whole HUD so attention goes outward. */
+#gameHud[data-kind="silent"]::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none;
+    z-index: 0;
+}
