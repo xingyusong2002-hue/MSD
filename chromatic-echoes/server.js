@@ -373,8 +373,26 @@ wss.on('connection', (ws) => {
                     game.accumulated = { red: 0, green: 0, blue: 0 };
                     startGameLoop();
                     broadcastState();
-                    console.log(`Round ${game.roundIndex + 1} started (${game.mode}): ${getCurrentTarget().name}`);
+                    console.log(`Round ${game.roundIndex + 1} started (${game.mode}): ${getCurrentRound().title}`);
                 }
+                break;
+            }
+
+            case 'back_to_lobby': {
+                if (ws._role !== 'host') return;
+                // Abort whatever is happening (playing or success) and drop
+                // the game back to lobby phase. The mode + roundIndex +
+                // connected players are preserved; the volumes / match
+                // timer are zeroed. Host then sees the lobby with the mode
+                // selector and Start Round button.
+                if (game.phase === 'lobby') return;
+                stopGameLoop();
+                game.phase = 'lobby';
+                game.volumes = { red: 0, green: 0, blue: 0 };
+                game.accumulated = { red: 0, green: 0, blue: 0 };
+                game.matchTimer = 0;
+                broadcastState();
+                console.log('Host returned to lobby');
                 break;
             }
 
@@ -411,7 +429,7 @@ wss.on('connection', (ws) => {
                     game.volumes = { red: 0, green: 0, blue: 0 };
                     game.accumulated = { red: 0, green: 0, blue: 0 };
                     broadcastState();
-                    console.log(`Next round (${game.mode}): ${getCurrentTarget().name}`);
+                    console.log(`Next round (${game.mode}): ${getCurrentRound().title}`);
                 }
                 break;
             }

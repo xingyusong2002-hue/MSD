@@ -1253,6 +1253,63 @@ body {
     font-weight: 500;
 }
 
+/* Secondary screen-back: sits next to the primary one (left side, but shifted
+   right so they don't overlap). Used for the host's "Back to lobby ↺" button
+   inside the game HUD. */
+.screen-back--secondary {
+    left: 170px;
+}
+
+/* ---- Live microphone meter (player wait screen) ----
+   Runs as soon as initAudio() succeeds so the visitor can verify their mic
+   is being heard *before* the host starts the round. The thin track + a
+   filling bar + a status word ("silent" / "listening…" / "good signal" /
+   "loud") is enough signal to make a working/non-working mic obvious. */
+.mic-meter {
+    margin: 2em auto 0;
+    max-width: 320px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    font-size: 0.78rem;
+    color: var(--c-text-dim);
+}
+.mic-meter-label {
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    color: var(--c-text-dim);
+    white-space: nowrap;
+}
+.mic-meter-track {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: oklch(100% 0 0 / 0.05);
+    overflow: hidden;
+}
+.mic-meter-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        var(--c-blue),
+        var(--c-green),
+        var(--c-red));
+    transition: width 80ms linear;
+}
+.mic-meter-status {
+    min-width: 70px;
+    text-align: right;
+    color: var(--c-text);
+    font-variant-numeric: tabular-nums;
+}
+
 /* Generic visibility helper (the existing one is scoped to .game-hud). */
 .hidden { display: none !important; }
 

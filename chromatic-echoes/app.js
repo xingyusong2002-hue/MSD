@@ -28,6 +28,8 @@
     const btnArchiveNewSession = document.getElementById('btnArchiveNewSession');
     const btnWaitingBack = document.getElementById('btnWaitingBack');
     const btnHudExit = document.getElementById('btnHudExit');
+    const btnBackToLobby = document.getElementById('btnBackToLobby');
+    const btnPlayerBack = document.getElementById('btnPlayerBack');
     const hudEmptyHint = document.getElementById('hudEmptyHint');
     const btnHost = document.getElementById('btnHost');
     const btnJoin = document.getElementById('btnJoin');
@@ -217,19 +219,59 @@
     async function initAudio() {
         try {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // Chrome ships AudioContexts in 'suspended' state unless created
+            // synchronously inside a user gesture. resume() makes sure analyser
+            // reads actually return non-zero data even on slow paths or when
+            // the click handler awaited getUserMedia before context use.
+            if (audioCtx.state === 'suspended') {
+                try { await audioCtx.resume(); } catch (_) { /* ignore */ }
+            }
             const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
             const source = audioCtx.createMediaStreamSource(stream);
             analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.85;
             source.connect(analyser); timeDomainData = new Float32Array(analyser.fftSize);
+            startMicMeter(); // diagnostic preview on the wait screen
             return true;
         } catch (e) { console.error('Mic denied:', e); alert('Microphone access is required to play.'); return false; }
     }
-    function getVolume() {
+    // Raw RMS, no threshold subtraction. Used by the diagnostic meter so
+    // visitors see ANY sound (including breathing) as movement — confirming
+    // the mic and analyser are alive.
+    function getVolumeRaw() {
         if (!analyser) return 0;
         analyser.getFloatTimeDomainData(timeDomainData);
-        let sum = 0; for (let i = 0; i < timeDomainData.length; i++) sum += timeDomainData[i] * timeDomainData[i];
-        const rms = Math.sqrt(sum / timeDomainData.length);
+        let sum = 0;
+        for (let i = 0; i < timeDomainData.length; i++) sum += timeDomainData[i] * timeDomainData[i];
+        return Math.sqrt(sum / timeDomainData.length);
+    }
+    function getVolume() {
+        const rms = getVolumeRaw();
         return Math.max(0, Math.min(1, (rms - CONFIG.volumeThreshold) / (CONFIG.volumeMax - CONFIG.volumeThreshold)));
+    }
+
+    // ---- Live mic-level meter on the player wait screen ----
+    // Runs independently of the game-state render loop so the player can
+    // verify "yes, the room hears me" *before* the host starts the round.
+    let micMeterInterval = null;
+    function startMicMeter() {
+        if (micMeterInterval) return;
+        micMeterInterval = setInterval(() => {
+            const bar = document.getElementById('micMeterFill');
+            const status = document.getElementById('micMeterStatus');
+            if (!bar) return;
+            if (!analyser || (audioCtx && audioCtx.state !== 'running')) {
+                bar.style.width = '0%';
+                if (status) status.textContent = audioCtx ? `mic ${audioCtx.state}` : 'no mic';
+                return;
+            }
+            const raw = getVolumeRaw();
+            const pct = Math.min(100, Math.round(raw * 600));
+            bar.style.width = pct + '%';
+            if (status) status.textContent = pct < 2 ? 'silent' : pct < 12 ? 'listening…' : pct < 40 ? 'good signal' : 'loud';
+        }, 90);
+    }
+    function stopMicMeter() {
+        if (micMeterInterval) { clearInterval(micMeterInterval); micMeterInterval = null; }
     }
 
     // ---- WebSocket ----
@@ -359,6 +401,15 @@
         if (btnHudExit) {
             const showExit = myRole === 'host' && experienceStage === 'dead-room';
             btnHudExit.classList.toggle('hidden', !showExit);
+        }
+        // Host-only "Back to lobby" — only meaningful when something is
+        // actually in flight (playing or success). In the lobby it would be
+        // a no-op.
+        if (btnBackToLobby) {
+            const showBack = myRole === 'host'
+                && experienceStage === 'dead-room'
+                && (s.phase === 'playing' || s.phase === 'success');
+            btnBackToLobby.classList.toggle('hidden', !showBack);
         }
         // "No players connected" hint — only the host needs to see it, and
         // only when a round is actually trying to play with zero phones.
@@ -529,6 +580,7 @@
     // Waiting Room "← Back to start" — drop role + reconnect to land on Landing.
     function exitToLanding() {
         myRole = null;
+        stopMicMeter();
         if (ws) ws.close();  // server cleans up via its on('close') handler
         showGameHud(false);
         stopRenderLoop();
@@ -536,6 +588,8 @@
     }
     btnWaitingBack.addEventListener('click', exitToLanding);
     btnHudExit.addEventListener('click', exitToLanding);
+    btnPlayerBack.addEventListener('click', exitToLanding);
+    btnBackToLobby.addEventListener('click', () => send({ type: 'back_to_lobby' }));
 
     // Museum walkthrough — stage transitions (host only; server enforces the role check too)
     btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));

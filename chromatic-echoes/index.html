@@ -164,11 +164,21 @@
 
     <!-- ===== SCREEN: Player Waiting ===== -->
     <div id="screenPlayerWait" class="screen">
+        <button id="btnPlayerBack" class="btn btn-ghost screen-back">← Leave</button>
         <div class="screen-content">
             <h2 class="screen-title">You are <span id="playerColorLabel" class="color-label">—</span></h2>
             <p class="screen-subtitle">Waiting for the host to start the round...</p>
             <div class="pulse-ring" id="waitPulse"></div>
             <p id="playerModeHint" class="mode-hint"></p>
+
+            <!-- Live mic-level meter. Runs as soon as initAudio() succeeds, so
+                 the visitor can confirm "the room is hearing me" before the
+                 host has even started the round. -->
+            <div class="mic-meter">
+                <span class="mic-meter-label">microphone</span>
+                <div class="mic-meter-track"><div id="micMeterFill" class="mic-meter-fill"></div></div>
+                <span id="micMeterStatus" class="mic-meter-status">no mic</span>
+            </div>
         </div>
     </div>
 
@@ -176,6 +186,11 @@
     <div id="gameHud" class="game-hud hidden" data-kind="mix">
         <!-- Host-only exit button (back to Landing). Hidden for players. -->
         <button id="btnHudExit" class="btn btn-ghost screen-back hidden">← Exit to start</button>
+
+        <!-- Host-only "back to lobby" — abort the current round, return to the
+             mode-and-start lobby. Lets the host change Live Mix / Fill Mode or
+             pick a different starting round. Visible during play only. -->
+        <button id="btnBackToLobby" class="btn btn-ghost screen-back screen-back--secondary hidden">Back to lobby ↺</button>
 
         <!-- Mode badge (top left) -->
         <div id="modeBadge" class="mode-badge">
