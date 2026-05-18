@@ -67,7 +67,7 @@
     const successHint = document.getElementById('successHint');
 
     const COLORS = { red: { r: 255, g: 51, b: 85 }, green: { r: 51, g: 255, b: 136 }, blue: { r: 51, g: 136, b: 255 } };
-    const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 50, cloudMaxRadius: 180, cloudLayers: 5 };
+    const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 80, cloudMaxRadius: 180, cloudLayers: 5, cloudMinOpacity: 0.18, cloudMaxOpacity: 0.5 };
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
@@ -156,7 +156,9 @@
         const { r, g, b } = COLORS[color];
         const vn = Math.min(1, volume * 3);
         const radius = lerp(CONFIG.cloudBaseRadius, CONFIG.cloudMaxRadius, vn);
-        const opacity = lerp(0.08, 0.45, vn);
+        // Min opacity is generous so visitors can SEE where their colour will
+        // emerge from before they make any sound. Max opacity grows with volume.
+        const opacity = lerp(CONFIG.cloudMinOpacity, CONFIG.cloudMaxOpacity, vn);
         if (opacity < 0.01) return;
         const breathe = Math.sin(time * 1.5 + (color === 'red' ? 0 : color === 'green' ? 2 : 4)) * 5;
         const r2 = radius + breathe;

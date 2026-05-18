@@ -55,6 +55,21 @@ Open the **Network** URL on each phone (on the same Wi-Fi) and pick a colour.
 > 💡 The projection client and the phone clients run the exact same `index.html`.
 > The difference is whether you press **Start as Host** or **Join Game**.
 
+### Testing all four roles from a single laptop
+
+Each browser tab is one client. To simulate a full session by yourself:
+
+1. Open **window 1**, click **Start as Host**, advance through the walkthrough into the Dead Room.
+2. Open **window 2** (Ctrl + N for a new window, *not* a new tab in the same window — some browsers throttle background tabs), click **Join Game**, pick **Red**, grant the mic.
+3. Open **window 3**, pick **Green**.
+4. Open **window 4**, pick **Blue**.
+
+All three player windows share the same physical microphone, so all three colour bars will move together when you speak — useful for testing **layout, particles, round flow, and stage transitions**. To test scenarios where one player is louder than another (Mix Echo), use separate physical devices on the LAN.
+
+If a player window shows their colour bar at 0% while you're speaking:
+- the tab was probably opened *before* you granted mic permission — close and reopen it, or click into the address bar and grant permission via the lock icon.
+- the OS audio input may have been muted/changed — check the input device in Windows sound settings.
+
 ---
 
 ## ⚠️ Phones + microphone access (read this before demo day)

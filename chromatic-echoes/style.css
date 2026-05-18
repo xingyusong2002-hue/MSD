@@ -1011,15 +1011,26 @@ body {
    Museum Walkthrough (Step 1 scaffolding)
    ============================================ */
 
-/* Waiting Room — interior photo of the TU Delft Dead Room as the backdrop.
-   Stack order (top → bottom):
+/* Landing + Waiting Room — interior photo of the TU Delft Dead Room as the
+   backdrop. Same stack on both screens for visual continuity from entry through
+   the briefing. Stack order (top → bottom):
      1. dark overlay so the copy stays legible
      2. the photo
      3. an earthy-brown fallback that matches the photo's palette when the file
         isn't yet on disk (image is committed separately by the user). */
+#screenLanding,
 #screenWaitingRoom {
     background:
         radial-gradient(ellipse at center, rgba(8, 8, 16, 0.45) 0%, rgba(5, 5, 8, 0.92) 80%),
+        url('assets/dead-room-interior.jpg') center/cover no-repeat,
+        #2a1f17;
+}
+
+/* Landing wants a slightly darker overlay so the giant gradient title and the
+   two big call-to-action buttons read with maximum contrast over the photo. */
+#screenLanding {
+    background:
+        radial-gradient(ellipse at center, rgba(5, 5, 8, 0.55) 0%, rgba(5, 5, 8, 0.95) 80%),
         url('assets/dead-room-interior.jpg') center/cover no-repeat,
         #2a1f17;
 }
