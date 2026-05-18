@@ -174,10 +174,20 @@
 
     <!-- ===== GAME HUD ===== -->
     <div id="gameHud" class="game-hud hidden" data-kind="mix">
+        <!-- Host-only exit button (back to Landing). Hidden for players. -->
+        <button id="btnHudExit" class="btn btn-ghost screen-back hidden">← Exit to start</button>
+
         <!-- Mode badge (top left) -->
         <div id="modeBadge" class="mode-badge">
             <span id="modeBadgeIcon">⚡</span>
             <span id="modeBadgeName">Live Mix</span>
+        </div>
+
+        <!-- Host-only "no players yet" hint. Shown when the round is playing but
+             the connectedPlayers list is empty. -->
+        <div id="hudEmptyHint" class="hud-empty-hint hidden">
+            <p class="hud-empty-title">No players connected</p>
+            <p class="hud-empty-text">Open a second window, click <b>Join Game</b>, and pick a colour to bring the room to life.</p>
         </div>
 
         <!-- Per-round instruction strip -->

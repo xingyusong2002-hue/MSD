@@ -27,6 +27,8 @@
     const btnBackToWaiting = document.getElementById('btnBackToWaiting');
     const btnArchiveNewSession = document.getElementById('btnArchiveNewSession');
     const btnWaitingBack = document.getElementById('btnWaitingBack');
+    const btnHudExit = document.getElementById('btnHudExit');
+    const hudEmptyHint = document.getElementById('hudEmptyHint');
     const btnHost = document.getElementById('btnHost');
     const btnJoin = document.getElementById('btnJoin');
     const roleCards = document.querySelectorAll('.role-card');
@@ -68,11 +70,12 @@
     const successHint = document.getElementById('successHint');
 
     const COLORS = { red: { r: 255, g: 51, b: 85 }, green: { r: 51, g: 255, b: 136 }, blue: { r: 51, g: 136, b: 255 } };
-    const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 80, cloudMaxRadius: 180, cloudLayers: 5, cloudMinOpacity: 0.18, cloudMaxOpacity: 0.5 };
+    const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 110, cloudMaxRadius: 220, cloudLayers: 5, cloudMinOpacity: 0.32, cloudMaxOpacity: 0.6 };
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
     let currentRound = null;
+    let connectedPlayers = [];  // ['red','green','blue'] subset — for source labels
     let audioCtx, analyser, timeDomainData;
 
     // Human-readable labels used on the HUD instruction strip.
@@ -175,6 +178,27 @@
         }
     }
 
+    // Draw a small colour name label near each source position. Gives the
+    // visitor a clear "RED IS HERE" anchor even when nobody is speaking,
+    // which otherwise leaves the screen looking blank.
+    function drawSourceLabel(cx, cy, color, isConnected) {
+        const { r, g, b } = COLORS[color];
+        const alpha = isConnected ? 0.9 : 0.45;
+        ctx.save();
+        ctx.font = '500 14px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 8;
+        ctx.fillText(color.toUpperCase(), cx, cy);
+        // Tiny status under the label
+        ctx.font = '300 10px "Plus Jakarta Sans", system-ui, sans-serif';
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.6})`;
+        ctx.fillText(isConnected ? 'speak now' : 'waiting…', cx, cy + 18);
+        ctx.restore();
+    }
+
     function drawMixingBoxGlow(mix) {
         if (mix.total < 0.05) return;
         const r = Math.round((mix.r / 100) * 255), g = Math.round((mix.g / 100) * 255), b = Math.round((mix.b / 100) * 255);
@@ -242,6 +266,7 @@
     function updateFromState(s) {
         gameMode = s.mode || 'live';
         experienceStage = s.experienceStage || 'dead-room';
+        connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];
 
         // Update mode buttons in lobby
         modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === gameMode));
@@ -328,6 +353,21 @@
                 && s.phase === 'playing'
                 && currentRound && currentRound.kind !== 'mix';
             btnEndRound.classList.toggle('hidden', !showEnd);
+        }
+        // Host-only HUD exit button — always visible to the host inside the
+        // dead-room stage, so they're never trapped in a round.
+        if (btnHudExit) {
+            const showExit = myRole === 'host' && experienceStage === 'dead-room';
+            btnHudExit.classList.toggle('hidden', !showExit);
+        }
+        // "No players connected" hint — only the host needs to see it, and
+        // only when a round is actually trying to play with zero phones.
+        if (hudEmptyHint) {
+            const showHint = myRole === 'host'
+                && experienceStage === 'dead-room'
+                && s.phase === 'playing'
+                && connectedPlayers.length === 0;
+            hudEmptyHint.classList.toggle('hidden', !showHint);
         }
 
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
@@ -451,6 +491,7 @@
             if (!src) continue;
             drawSourceCloud(src.x, src.y, vol, color);
             for (const p of particlePools[color]) { p.update(vol); p.draw(ctx, vol); }
+            drawSourceLabel(src.x, src.y, color, connectedPlayers.includes(color));
         }
 
         const mix = {
@@ -486,11 +527,15 @@
     btnEndRound.addEventListener('click', () => send({ type: 'end_round' }));
 
     // Waiting Room "← Back to start" — drop role + reconnect to land on Landing.
-    btnWaitingBack.addEventListener('click', () => {
+    function exitToLanding() {
         myRole = null;
         if (ws) ws.close();  // server cleans up via its on('close') handler
+        showGameHud(false);
+        stopRenderLoop();
         showScreen('landing');
-    });
+    }
+    btnWaitingBack.addEventListener('click', exitToLanding);
+    btnHudExit.addEventListener('click', exitToLanding);
 
     // Museum walkthrough — stage transitions (host only; server enforces the role check too)
     btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));

@@ -1196,6 +1196,63 @@ body {
         drop-shadow(0 5px 18px oklch(0% 0 0 / 0.6));
 }
 
+/* ---- In-HUD controls and hints (Dead Room) ---- */
+/* The "← Exit to start" button on the game HUD reuses .screen-back for
+   placement; nothing extra needed beyond making it sit slightly inside the
+   HUD's safe zone and stay legible over the dark canvas. */
+#btnHudExit.screen-back {
+    top: 14px;
+    left: 14px;
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    color: var(--c-text-dim);
+}
+#btnHudExit.screen-back:hover {
+    color: var(--c-text);
+    border-color: oklch(100% 0 0 / 0.18);
+}
+
+/* Empty-room hint shown to the host when a round is "playing" but no phones
+   have joined as Red / Green / Blue. Sits roughly mid-screen so it doesn't
+   collide with the instruction strip, mode badge, round badge, or player
+   bars. Centred horizontally and quietly framed. */
+.hud-empty-hint {
+    position: absolute;
+    top: 38%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: min(520px, 86vw);
+    padding: 22px 28px;
+    border-radius: var(--radius);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;  /* doesn't block clicks on what's behind */
+}
+.hud-empty-title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--c-text);
+    margin-bottom: 0.5em;
+}
+.hud-empty-text {
+    font-family: var(--font-body);
+    font-size: 0.92rem;
+    font-weight: 300;
+    line-height: 1.55;
+    color: var(--c-text-dim);
+}
+.hud-empty-text b {
+    color: var(--c-text);
+    font-weight: 500;
+}
+
 /* Generic visibility helper (the existing one is scoped to .game-hud). */
 .hidden { display: none !important; }
 

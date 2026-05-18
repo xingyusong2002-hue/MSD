@@ -142,11 +142,18 @@ function checkMatch(mix, target, tolerance) {
 }
 
 // ---- Broadcast to all connected clients ----
+// Defensive: a single failing client must not throw out of forEach and stop
+// the broadcast for everyone else. We saw the server wedge after a rapid
+// refresh — almost certainly a half-closed socket throwing on send().
 function broadcast(msg) {
     const data = JSON.stringify(msg);
     wss.clients.forEach(client => {
-        if (client.readyState === 1) {
+        if (client.readyState !== 1) return;
+        try {
             client.send(data);
+        } catch (e) {
+            console.error('broadcast send failed:', e.message);
+            try { client.terminate(); } catch (_) { /* ignore */ }
         }
     });
 }
@@ -192,6 +199,17 @@ const server = http.createServer((req, res) => {
 
 // ---- WebSocket Server ----
 const wss = new WebSocketServer({ server });
+wss.on('error', (err) => console.error('WSS error:', err.message));
+
+// Process-level safety net. Without this, a single thrown error inside any
+// async handler can leave the HTTP server listening but unresponsive (the
+// exact "can't reach the link" symptom we hit).
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT:', err && err.stack || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
 
 // Game loop — broadcast frames at ~30fps during play
 const MATCH_TOLERANCE = 5;        // ±5%
@@ -269,6 +287,12 @@ wss.on('connection', (ws) => {
     console.log('Client connected. Total:', wss.clients.size);
 
     ws._role = null;
+
+    // A socket-level error from one client must not propagate up the ws lib
+    // and kill the whole server. Log and let the matching 'close' fire.
+    ws.on('error', (err) => {
+        console.error('WS client error (', ws._role || 'unjoined', '):', err.message);
+    });
 
     ws.on('message', (raw) => {
         let msg;
