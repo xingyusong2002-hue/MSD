@@ -36,9 +36,15 @@ const ROUNDS = [
 // ---- Game State ----
 let game = createFreshGame();
 
+// Outer museum walkthrough — independent of the per-round `phase` machine.
+// Visitors flow: waiting-room -> threshold -> dead-room -> archive.
+// All existing gameplay lives inside `experienceStage === 'dead-room'`.
+const STAGES = ['waiting-room', 'threshold', 'dead-room', 'archive'];
+
 function createFreshGame() {
     return {
-        phase: 'lobby',                  // lobby | playing | success
+        experienceStage: 'waiting-room', // outer museum stage (see STAGES)
+        phase: 'lobby',                  // lobby | playing | success (inner, dead-room only)
         mode: 'live',                    // 'live' | 'accumulate'
         host: null,                      // ws connection
         players: { red: null, green: null, blue: null },
@@ -127,6 +133,7 @@ function broadcastState() {
     const mix = computeCurrentMix();
     broadcast({
         type: 'state',
+        experienceStage: game.experienceStage,
         phase: game.phase,
         mode: game.mode,
         availableRoles: getAvailableRoles(),
@@ -278,6 +285,24 @@ wss.on('connection', (ws) => {
                 break;
             }
 
+            case 'set_stage': {
+                if (ws._role !== 'host') return;
+                if (!STAGES.includes(msg.stage)) return;
+                game.experienceStage = msg.stage;
+                // Leaving dead-room mid-round? Park the round back at lobby so it
+                // doesn't keep broadcasting frames behind the new screen.
+                if (msg.stage !== 'dead-room' && game.phase === 'playing') {
+                    stopGameLoop();
+                    game.phase = 'lobby';
+                    game.volumes = { red: 0, green: 0, blue: 0 };
+                    game.accumulated = { red: 0, green: 0, blue: 0 };
+                    game.matchTimer = 0;
+                }
+                broadcastState();
+                console.log(`Stage -> ${game.experienceStage}`);
+                break;
+            }
+
             case 'set_mode': {
                 if (ws._role !== 'host') return;
                 if (game.phase === 'lobby' && (msg.mode === 'live' || msg.mode === 'accumulate')) {
@@ -357,6 +382,7 @@ wss.on('connection', (ws) => {
     // Send current state to newly connected client
     ws.send(JSON.stringify({
         type: 'state',
+        experienceStage: game.experienceStage,
         phase: game.phase,
         mode: game.mode,
         availableRoles: getAvailableRoles(),

@@ -997,4 +997,135 @@ body {
     .mode-btn {
         min-width: 220px;
     }
+
+    .stage-toolbar {
+        bottom: 10px;
+        top: auto;
+        right: 50%;
+        transform: translateX(50%);
+        padding: 6px 8px;
+    }
+}
+
+/* ============================================
+   Museum Walkthrough (Step 1 scaffolding)
+   ============================================ */
+
+/* Generic visibility helper (the existing one is scoped to .game-hud). */
+.hidden { display: none !important; }
+
+.stage-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+    padding: 4px 12px;
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    margin-bottom: 1.2em;
+    background: var(--glass-bg);
+}
+
+.walkthrough-body {
+    text-align: left;
+    max-width: 540px;
+    margin: 0 auto 1.8em;
+    color: var(--color-text);
+    line-height: 1.6;
+    font-weight: 300;
+}
+
+.walkthrough-body p {
+    margin-bottom: 1em;
+    font-size: 1rem;
+}
+
+.walkthrough-body strong {
+    color: var(--color-text);
+    font-weight: 500;
+}
+
+.walkthrough-body em {
+    font-style: italic;
+    color: var(--color-text-dim);
+}
+
+.host-controls {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 1em 0 0.5em;
+}
+
+.reflection {
+    text-align: center;
+    color: var(--color-text-dim);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-top: 1.4em;
+}
+
+.archive-trace {
+    border: 1px dashed var(--glass-border);
+    border-radius: var(--radius);
+    padding: 28px 16px;
+    background: var(--glass-bg);
+    margin: 1em 0;
+}
+
+.archive-trace-hint {
+    color: var(--color-text-dim);
+    font-size: 0.9rem;
+    text-align: center;
+    margin: 0;
+}
+
+/* Floating host-only stage toolbar (visible inside the dead-room stage). */
+.stage-toolbar {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    font-size: 0.8rem;
+}
+
+.stage-toolbar-label {
+    color: var(--color-text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    padding: 0 6px;
+}
+
+.stage-toolbar-btn {
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-text-dim);
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: var(--font-main);
+    font-size: 0.8rem;
+    transition: all 0.2s ease;
+}
+
+.stage-toolbar-btn:hover {
+    color: var(--color-text);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.stage-toolbar-btn.active {
+    color: var(--color-text);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.18);
 }

@@ -13,7 +13,19 @@
     const screenLobby = document.getElementById('screenLobby');
     const screenPlayerWait = document.getElementById('screenPlayerWait');
     const screenSuccess = document.getElementById('screenSuccess');
+    const screenWaitingRoom = document.getElementById('screenWaitingRoom');
+    const screenThreshold = document.getElementById('screenThreshold');
+    const screenArchive = document.getElementById('screenArchive');
     const gameHud = document.getElementById('gameHud');
+    const stageToolbar = document.getElementById('stageToolbar');
+    const stageToolbarBtns = document.querySelectorAll('.stage-toolbar-btn');
+    const hostWaitingControls = document.getElementById('hostWaitingControls');
+    const hostThresholdControls = document.getElementById('hostThresholdControls');
+    const hostArchiveControls = document.getElementById('hostArchiveControls');
+    const btnAdvanceToThreshold = document.getElementById('btnAdvanceToThreshold');
+    const btnAdvanceToDeadRoom = document.getElementById('btnAdvanceToDeadRoom');
+    const btnBackToWaiting = document.getElementById('btnBackToWaiting');
+    const btnArchiveNewSession = document.getElementById('btnArchiveNewSession');
     const btnHost = document.getElementById('btnHost');
     const btnJoin = document.getElementById('btnJoin');
     const roleCards = document.querySelectorAll('.role-card');
@@ -55,7 +67,8 @@
     const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 50, cloudMaxRadius: 180, cloudLayers: 5 };
 
     // ---- State ----
-    let ws = null, myRole = null, gameMode = 'live', audioCtx, analyser, timeDomainData;
+    let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
+    let audioCtx, analyser, timeDomainData;
     let animationId = null, time = 0;
     let smoothVolumes = { red: 0, green: 0, blue: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
@@ -201,8 +214,13 @@
         switch (msg.type) {
             case 'assigned':
                 myRole = msg.role;
-                if (myRole === 'host') { showScreen('lobby'); }
-                else { showScreen('playerWait'); playerColorLabel.textContent = myRole.toUpperCase(); playerColorLabel.className = 'color-label ' + myRole; waitPulse.className = 'pulse-ring ' + myRole; }
+                // Per-player UI setup; screen routing is decided by the next 'state' broadcast
+                // (which is always sent right after 'assigned' on the server side).
+                if (myRole !== 'host') {
+                    playerColorLabel.textContent = myRole.toUpperCase();
+                    playerColorLabel.className = 'color-label ' + myRole;
+                    waitPulse.className = 'pulse-ring ' + myRole;
+                }
                 break;
             case 'state': updateFromState(msg); break;
             case 'frame': updateFrame(msg); break;
@@ -213,6 +231,7 @@
 
     function updateFromState(s) {
         gameMode = s.mode || 'live';
+        experienceStage = s.experienceStage || 'dead-room';
 
         // Update mode buttons in lobby
         modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === gameMode));
@@ -252,16 +271,41 @@
             if (hint) hint.textContent = has ? `${s.connectedPlayers.length}/3 players connected` : 'At least one player must join';
         }
 
-        // Phase transitions
-        if (s.phase === 'playing') {
-            showScreen('none'); showGameHud(true, s); startRenderLoop();
-        } else if (s.phase === 'lobby') {
+        // Stage-aware routing. The outer museum walkthrough decides which screen we're on.
+        // Only inside the 'dead-room' stage does the inner phase machine choose the screen.
+        const stageToolbarShouldShow = myRole === 'host' && experienceStage === 'dead-room';
+        stageToolbar.classList.toggle('hidden', !stageToolbarShouldShow);
+        stageToolbarBtns.forEach(b => b.classList.toggle('active', b.dataset.stage === experienceStage));
+        toggleHostStageControls();
+
+        if (experienceStage === 'waiting-room') {
             showGameHud(false); stopRenderLoop();
-            if (myRole === 'host') showScreen('lobby');
-            else if (myRole) showScreen('playerWait');
+            showScreen('waitingRoom');
+        } else if (experienceStage === 'threshold') {
+            showGameHud(false); stopRenderLoop();
+            showScreen('threshold');
+        } else if (experienceStage === 'archive') {
+            showGameHud(false); stopRenderLoop();
+            showScreen('archive');
+        } else {
+            // experienceStage === 'dead-room' — original phase routing
+            if (s.phase === 'playing') {
+                showScreen('none'); showGameHud(true, s); startRenderLoop();
+            } else if (s.phase === 'lobby') {
+                showGameHud(false); stopRenderLoop();
+                if (myRole === 'host') showScreen('lobby');
+                else if (myRole) showScreen('playerWait');
+            }
         }
 
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
+    }
+
+    function toggleHostStageControls() {
+        const isHost = myRole === 'host';
+        hostWaitingControls.classList.toggle('hidden', !isHost);
+        hostThresholdControls.classList.toggle('hidden', !isHost);
+        hostArchiveControls.classList.toggle('hidden', !isHost);
     }
 
     function updateFrame(f) {
@@ -324,10 +368,15 @@
     }
 
     // ---- Screen Management ----
-    const screens = [screenLanding, screenRoles, screenLobby, screenPlayerWait, screenSuccess];
+    const screens = [screenLanding, screenRoles, screenLobby, screenPlayerWait, screenSuccess,
+                     screenWaitingRoom, screenThreshold, screenArchive];
     function showScreen(name) {
         screens.forEach(s => s.classList.remove('active'));
-        const map = { landing: screenLanding, roles: screenRoles, lobby: screenLobby, playerWait: screenPlayerWait, success: screenSuccess };
+        const map = {
+            landing: screenLanding, roles: screenRoles, lobby: screenLobby,
+            playerWait: screenPlayerWait, success: screenSuccess,
+            waitingRoom: screenWaitingRoom, threshold: screenThreshold, archive: screenArchive,
+        };
         if (map[name]) map[name].classList.add('active');
     }
     function showGameHud(visible, state) {
@@ -384,6 +433,15 @@
 
     btnStartRound.addEventListener('click', () => send({ type: 'start_round' }));
     btnNextRound.addEventListener('click', () => send({ type: 'next_round' }));
+
+    // Museum walkthrough — stage transitions (host only; server enforces the role check too)
+    btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));
+    btnAdvanceToDeadRoom.addEventListener('click', () => send({ type: 'set_stage', stage: 'dead-room' }));
+    btnBackToWaiting.addEventListener('click', () => send({ type: 'set_stage', stage: 'waiting-room' }));
+    btnArchiveNewSession.addEventListener('click', () => send({ type: 'set_stage', stage: 'waiting-room' }));
+    stageToolbarBtns.forEach(btn => {
+        btn.addEventListener('click', () => send({ type: 'set_stage', stage: btn.dataset.stage }));
+    });
 
     // ---- Init ----
     connectWS();

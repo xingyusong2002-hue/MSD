@@ -14,6 +14,58 @@
 <body>
     <canvas id="rippleCanvas"></canvas>
 
+    <!-- ===== Host-only stage toolbar (visible inside dead-room stage) ===== -->
+    <div id="stageToolbar" class="stage-toolbar hidden">
+        <span class="stage-toolbar-label">Stage</span>
+        <button class="stage-toolbar-btn" data-stage="waiting-room">Waiting</button>
+        <button class="stage-toolbar-btn" data-stage="threshold">Threshold</button>
+        <button class="stage-toolbar-btn active" data-stage="dead-room">Dead Room</button>
+        <button class="stage-toolbar-btn" data-stage="archive">Archive</button>
+    </div>
+
+    <!-- ===== SCREEN: Waiting Room (museum walkthrough stage 1) ===== -->
+    <div id="screenWaitingRoom" class="screen">
+        <div class="screen-content">
+            <span class="stage-tag">Stage 1 / 4 · Waiting Room</span>
+            <h2 class="screen-title">Welcome to Chromatic Echoes</h2>
+            <p class="screen-subtitle">A few seconds of context before you step inside</p>
+            <div class="walkthrough-body">
+                <p>You are about to enter the <strong>Dead Room</strong> — an anechoic chamber
+                   that absorbs almost all sound. Your voice will sound flat. Your claps will
+                   not echo. Even silence will feel different.</p>
+                <p>Inside, you will become a <em>colour</em>. When you make sound, the room
+                   will paint with it on the screen at the centre. Working with the others,
+                   you'll learn what loudness, rhythm, and silence look like.</p>
+            </div>
+            <div id="hostWaitingControls" class="host-controls hidden">
+                <button id="btnAdvanceToThreshold" class="btn btn-primary">
+                    <span class="btn-text">Open the doors →</span>
+                </button>
+            </div>
+            <p class="hint" id="waitingHint">Waiting for the host to begin…</p>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Threshold (museum walkthrough stage 2) ===== -->
+    <div id="screenThreshold" class="screen">
+        <div class="screen-content">
+            <span class="stage-tag">Stage 2 / 4 · Threshold</span>
+            <h2 class="screen-title">Step Through</h2>
+            <p class="screen-subtitle">You are crossing into echo-free space</p>
+            <div class="walkthrough-body">
+                <p>Listen for what isn't there. Take a moment to notice how the air feels.</p>
+                <p>When you are ready, the host will open the Dead Room round.</p>
+            </div>
+            <div id="hostThresholdControls" class="host-controls hidden">
+                <button id="btnAdvanceToDeadRoom" class="btn btn-primary">
+                    <span class="btn-text">Enter the Dead Room →</span>
+                </button>
+                <button id="btnBackToWaiting" class="btn btn-ghost">← Back</button>
+            </div>
+            <p class="hint" id="thresholdHint">Waiting for the host…</p>
+        </div>
+    </div>
+
     <!-- ===== SCREEN: Landing ===== -->
     <div id="screenLanding" class="screen active">
         <div class="screen-content">
@@ -178,6 +230,28 @@
         <!-- Round indicator -->
         <div id="roundBadge" class="round-badge">
             Round <span id="roundNum">1</span> / <span id="roundTotal">5</span>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN: Archive (museum walkthrough stage 4) ===== -->
+    <div id="screenArchive" class="screen">
+        <div class="screen-content">
+            <span class="stage-tag">Stage 4 / 4 · Echo Archive</span>
+            <h2 class="screen-title">What did the room sound like?</h2>
+            <p class="screen-subtitle">A trace of your group's voices</p>
+            <div class="walkthrough-body">
+                <div id="archiveTracePlaceholder" class="archive-trace">
+                    <p class="archive-trace-hint">Your group's sound trace will appear here.</p>
+                </div>
+                <p class="reflection">Take a moment to reflect:<br>
+                   <em>What surprised you most about silence?</em></p>
+            </div>
+            <div id="hostArchiveControls" class="host-controls hidden">
+                <button id="btnArchiveNewSession" class="btn btn-primary">
+                    <span class="btn-text">Start a new session</span>
+                </button>
+            </div>
+            <p class="hint" id="archiveHint">Thank you for visiting the Dead Room.</p>
         </div>
     </div>
 
