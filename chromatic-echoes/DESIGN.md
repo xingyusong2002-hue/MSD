@@ -130,6 +130,50 @@ content; they should never be the primary action.
   overlay-gradient + `url(...)` + fallback colour, in that order. See
   `#screenLanding` / `#screenWaitingRoom` for the canonical example.
 
+### Photo-backed screens and their images
+
+Four screens currently use a Dead Room photograph as the backdrop:
+
+| Screen | Image (in `assets/`) | Use |
+|---|---|---|
+| `#screenLanding` | `DeadRoom-63.png` | The entrance/landing. |
+| `#screenWaitingRoom` | `DeadRoom-63.png` | Visual continuity with Landing — same photo. |
+| `#screenThreshold` | `stage2.png` | The doorway photo — visitors are about to step inside. |
+| `#screenRoles` | `player.png` | The chamber-with-people photo — players are choosing what they'll be in that room. |
+
+All four share the same vignette recipe:
+```css
+background:
+    radial-gradient(ellipse 80% 70% at center,
+        oklch(6% 0.005 60 / ~0.5) 0%,   /* centre — photo most visible */
+        oklch(4% 0.005 60 / ~0.85) 50%,
+        oklch(2% 0.003 60 / 1) 92%),     /* edges — fully black */
+    url('assets/<file>.png') center/cover no-repeat,
+    oklch(20% 0.025 60);                 /* fallback */
+```
+The ellipse is intentionally *tight* (80% × 70%) and the gradient is *steep*
+— centre opacity ~0.5, edges ~1.0. This produces a theatrical-spotlight feel
+and consistently dark corners that anchor any UI placed there (back button,
+toolbar). Per-screen overlay opacity is tuned ±5% to suit the photo's
+brightness.
+
+### Title hierarchy
+
+There are two distinct title patterns. Don't reuse Landing's `.title` style
+on inner screens — it dilutes the entrance moment.
+
+| Where | Selector | Font | Treatment |
+|---|---|---|---|
+| **Landing** (poster) | `.title` | Space Grotesk, uppercase, weight 300, 0.2em tracking | Tri-stop vertical gradient (cool→warm), four-layer drop-shadow halo, **breathing animation** (7s cycle). The biggest type in the project. |
+| **Inner stages** (chapters) | `#screenThreshold .screen-title`, `#screenRoles .screen-title` | **Newsreader italic**, weight 400, normal case | Solid `--c-text` colour, three-layer drop-shadow halo, *no* breathing. Smaller scale than Landing. |
+| **Other stages** | `.screen-title` (default) | Space Grotesk, weight 300 | No glow filter — these screens (Waiting Room, Archive) have a `.stage-tag` glass pill above them that already provides the "we're inside a numbered moment" framing. |
+
+The Newsreader italic on Threshold/Roles serves as an **editorial voice** —
+the entrance is a poster (sans, all-caps, dramatic), the inner chapters are a
+journal (serif, italic, lower-case). This is why we don't add a 4th font
+family: the italic variant of an already-loaded family carries enough
+distinct character.
+
 ### Title (Landing) — looming glow
 Used for the giant `CHROMATIC ECHOES` headline only.
 
@@ -142,10 +186,11 @@ background: linear-gradient(180deg,
 background-clip: text;
 -webkit-text-fill-color: transparent;
 filter:
-    drop-shadow(0 0 24px oklch(96% 0.01 60 / 0.28))     /* tight halo */
-    drop-shadow(0 0 64px oklch(96% 0.01 60 / 0.14))     /* wide halo */
-    drop-shadow(0 6px 20px oklch(0% 0 0 / 0.55));        /* depth */
-animation: titleBreathe 6s ease-in-out infinite;
+    drop-shadow(0 0  30px oklch(96% 0.01 60 / 0.42))   /* tight halo */
+    drop-shadow(0 0  90px oklch(96% 0.01 60 / 0.26))   /* mid halo */
+    drop-shadow(0 0 180px oklch(96% 0.01 60 / 0.12))   /* ultra-wide halo */
+    drop-shadow(0 8px 26px oklch(0% 0 0 / 0.65));      /* depth */
+animation: titleBreathe 7s ease-in-out infinite;       /* swells to ~+30% at 50% */
 ```
 
 Notes:

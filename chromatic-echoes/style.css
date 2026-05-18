@@ -136,26 +136,29 @@ body {
     -webkit-text-fill-color: transparent;
     color: transparent;
     filter:
-        drop-shadow(0 0 24px oklch(96% 0.01 60 / 0.28))
-        drop-shadow(0 0 64px oklch(96% 0.01 60 / 0.14))
-        drop-shadow(0 6px 20px oklch(0% 0 0 / 0.55));
-    animation: titleBreathe 6s ease-in-out infinite;
+        drop-shadow(0 0 30px oklch(96% 0.01 60 / 0.42))
+        drop-shadow(0 0 90px oklch(96% 0.01 60 / 0.26))
+        drop-shadow(0 0 180px oklch(96% 0.01 60 / 0.12))
+        drop-shadow(0 8px 26px oklch(0% 0 0 / 0.65));
+    animation: titleBreathe 7s ease-in-out infinite;
 }
 
-/* Slow, almost-invisible glow breathing — gives the title a sense of presence
-   without being a distracting motion. ±4% intensity, 6-second cycle. */
+/* Slow glow breathing — three-stop halo so the swell feels alive without
+   being a distracting motion. ~7-second cycle. */
 @keyframes titleBreathe {
     0%, 100% {
         filter:
-            drop-shadow(0 0 24px oklch(96% 0.01 60 / 0.28))
-            drop-shadow(0 0 64px oklch(96% 0.01 60 / 0.14))
-            drop-shadow(0 6px 20px oklch(0% 0 0 / 0.55));
+            drop-shadow(0 0 30px oklch(96% 0.01 60 / 0.42))
+            drop-shadow(0 0 90px oklch(96% 0.01 60 / 0.26))
+            drop-shadow(0 0 180px oklch(96% 0.01 60 / 0.12))
+            drop-shadow(0 8px 26px oklch(0% 0 0 / 0.65));
     }
     50% {
         filter:
-            drop-shadow(0 0 28px oklch(96% 0.01 60 / 0.34))
-            drop-shadow(0 0 80px oklch(96% 0.01 60 / 0.18))
-            drop-shadow(0 6px 20px oklch(0% 0 0 / 0.55));
+            drop-shadow(0 0 40px oklch(96% 0.01 60 / 0.55))
+            drop-shadow(0 0 120px oklch(96% 0.01 60 / 0.36))
+            drop-shadow(0 0 230px oklch(96% 0.01 60 / 0.18))
+            drop-shadow(0 8px 26px oklch(0% 0 0 / 0.65));
     }
 }
 
@@ -1078,36 +1081,63 @@ body {
    Museum Walkthrough (Step 1 scaffolding)
    ============================================ */
 
-/* Landing + Waiting Room — interior photo of the TU Delft Dead Room as the
-   backdrop. Same stack on both screens for visual continuity from entry through
-   the briefing.
-   Stack order (top → bottom):
-     1. dark overlay so the copy stays legible — denser at centre because that's
-        where the title and body text sit, and the foam wedges produce bright
-        highlights that fight readability
-     2. the photo
-     3. an earthy-brown fallback that matches the photo's palette when the file
-        isn't yet on disk (image is committed separately by the user). */
+/* Photo-backed entrance screens — Landing, Waiting Room, Threshold, Roles.
+   Each one uses a Dead Room photo + a strong elliptical vignette overlay.
+   The vignette is *tighter* and *steeper* than typical: ~50% opacity around
+   the title/text zone, ramping to ~100% opaque-black before reaching the
+   edges. That produces a clear theatrical-spotlight effect — the photo feels
+   illuminated in the middle, swallowed by darkness at the corners.
+   Stack order in `background`: overlay first (top), photo middle, fallback. */
 #screenLanding,
-#screenWaitingRoom {
+#screenWaitingRoom,
+#screenThreshold,
+#screenRoles {
+    background-color: oklch(20% 0.025 60);
+}
+
+#screenLanding {
     background:
-        radial-gradient(ellipse at center,
-            oklch(8% 0.005 60 / 0.7) 0%,
-            oklch(6% 0.005 60 / 0.85) 50%,
-            oklch(4% 0.005 60 / 0.96) 85%),
+        radial-gradient(ellipse 80% 70% at center,
+            oklch(5% 0.005 60 / 0.55) 0%,
+            oklch(4% 0.005 60 / 0.88) 50%,
+            oklch(2% 0.003 60 / 1) 92%),
         url('assets/DeadRoom-63.png') center/cover no-repeat,
         oklch(20% 0.025 60);
 }
 
-/* Landing pushes the centre overlay a notch darker so the giant gradient title
-   reads with maximum contrast over the busy foam pattern. */
-#screenLanding {
+#screenWaitingRoom {
     background:
-        radial-gradient(ellipse at center,
-            oklch(6% 0.005 60 / 0.78) 0%,
-            oklch(5% 0.005 60 / 0.9) 50%,
-            oklch(3% 0.005 60 / 0.98) 85%),
+        radial-gradient(ellipse 80% 70% at center,
+            oklch(6% 0.005 60 / 0.5) 0%,
+            oklch(5% 0.005 60 / 0.85) 50%,
+            oklch(2% 0.003 60 / 1) 92%),
         url('assets/DeadRoom-63.png') center/cover no-repeat,
+        oklch(20% 0.025 60);
+}
+
+/* Threshold — the doorway-into-the-Dead-Room photo. Slightly narrower
+   ellipse so the door frame in the photo sits comfortably inside the
+   illuminated zone. */
+#screenThreshold {
+    background:
+        radial-gradient(ellipse 75% 68% at center,
+            oklch(6% 0.005 60 / 0.5) 0%,
+            oklch(4% 0.005 60 / 0.86) 50%,
+            oklch(2% 0.003 60 / 1) 92%),
+        url('assets/stage2.png') center/cover no-repeat,
+        oklch(20% 0.025 60);
+}
+
+/* Roles (Choose Your Colour) — the group-in-the-chamber photo. The player
+   identity decision belongs to the visitor; the photo shows what they're
+   about to step into. */
+#screenRoles {
+    background:
+        radial-gradient(ellipse 82% 72% at center,
+            oklch(6% 0.005 60 / 0.55) 0%,
+            oklch(4% 0.005 60 / 0.88) 50%,
+            oklch(2% 0.003 60 / 1) 92%),
+        url('assets/player.png') center/cover no-repeat,
         oklch(20% 0.025 60);
 }
 
@@ -1124,9 +1154,46 @@ body {
 #screenWaitingRoom .walkthrough-body p,
 #screenWaitingRoom .walkthrough-body em,
 #screenWaitingRoom .walkthrough-body strong,
-#screenWaitingRoom .stage-tag {
-    text-shadow: 0 1px 2px oklch(0% 0 0 / 0.7),
-                 0 0 12px oklch(0% 0 0 / 0.45);
+#screenWaitingRoom .stage-tag,
+#screenThreshold .subtitle,
+#screenThreshold .hint,
+#screenThreshold .walkthrough-body,
+#screenThreshold .walkthrough-body p,
+#screenThreshold .stage-tag,
+#screenRoles .subtitle,
+#screenRoles .screen-subtitle,
+#screenRoles .role-name,
+#screenRoles .role-status {
+    text-shadow: 0 1px 2px oklch(0% 0 0 / 0.75),
+                 0 0 12px oklch(0% 0 0 / 0.5);
+}
+
+/* ---- Subordinate stage titles (Threshold, Roles) ----
+   The Landing title is the *poster* of the whole experience — Space Grotesk
+   uppercase with the big breathing glow. The Threshold and Roles screens are
+   inner *chapters* — a quieter, editorial voice fits them better. Newsreader
+   italic gives a serif, narrative character that's clearly different from
+   the Landing title without competing with it. Slightly smaller scale, no
+   uppercase, single-halo glow (no breathing).
+   This selector also applies to #screenLanding's own `.screen-title` should
+   we ever add one there — but it doesn't currently. */
+#screenThreshold .screen-title,
+#screenRoles .screen-title {
+    font-family: var(--font-italic);
+    font-style: italic;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    font-size: clamp(1.9rem, 5vw, 3.2rem);
+    color: var(--c-text);
+    /* Override the parent background-clip from .title (we don't inherit it,
+       but make sure nothing else strips the colour). */
+    background: none;
+    -webkit-text-fill-color: var(--c-text);
+    filter:
+        drop-shadow(0 0 22px oklch(96% 0.01 60 / 0.3))
+        drop-shadow(0 0 56px oklch(96% 0.01 60 / 0.15))
+        drop-shadow(0 5px 18px oklch(0% 0 0 / 0.6));
 }
 
 /* Generic visibility helper (the existing one is scoped to .game-hud). */
