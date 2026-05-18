@@ -1022,7 +1022,7 @@ body {
 #screenWaitingRoom {
     background:
         radial-gradient(ellipse at center, rgba(8, 8, 16, 0.45) 0%, rgba(5, 5, 8, 0.92) 80%),
-        url('assets/dead-room-interior.jpg') center/cover no-repeat,
+        url('assets/DeadRoom-63.png') center/cover no-repeat,
         #2a1f17;
 }
 
@@ -1031,7 +1031,7 @@ body {
 #screenLanding {
     background:
         radial-gradient(ellipse at center, rgba(5, 5, 8, 0.55) 0%, rgba(5, 5, 8, 0.95) 80%),
-        url('assets/dead-room-interior.jpg') center/cover no-repeat,
+        url('assets/DeadRoom-63.png') center/cover no-repeat,
         #2a1f17;
 }
 
