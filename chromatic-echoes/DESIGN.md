@@ -78,7 +78,8 @@ support `oklch()` natively.
 | `--c-surface`     | `oklch(100% 0 0 / 0.04)`         | Faint translucent glass; default card/pill background. |
 | `--c-surface-h`   | `oklch(100% 0 0 / 0.08)`         | Hover state for the above. |
 | `--c-text`        | `oklch(96% 0.01 60)`             | Warm off-white. Primary text. |
-| `--c-text-dim`    | `oklch(72% 0.01 60 / 0.7)`       | Subdued captions / hints. |
+| `--c-text-dim`    | `oklch(82% 0.012 60)`            | Subdued captions and emphasis. Solid alpha — stays legible over photo backgrounds. |
+| `--c-text-soft`   | `oklch(70% 0.012 60 / 0.85)`     | Very quiet hint text (e.g. `.hint` under buttons). |
 | `--c-border`      | `oklch(100% 0 0 / 0.08)`         | Pill/card outlines. |
 | `--c-red`         | `oklch(65% 0.22 25)`             | Player Red. Use only for player identity. |
 | `--c-green`       | `oklch(85% 0.20 155)`            | Player Green. Same rule. |
@@ -128,6 +129,52 @@ content; they should never be the primary action.
 - Big background photos use the layered `background:` stack —
   overlay-gradient + `url(...)` + fallback colour, in that order. See
   `#screenLanding` / `#screenWaitingRoom` for the canonical example.
+
+### Title (Landing) — looming glow
+Used for the giant `CHROMATIC ECHOES` headline only.
+
+```css
+background: linear-gradient(180deg,
+    oklch(99% 0.012 240),    /* cool top */
+    oklch(95% 0.008 100),    /* neutral middle */
+    oklch(82% 0.018 60));    /* warm bottom */
+-webkit-background-clip: text;
+background-clip: text;
+-webkit-text-fill-color: transparent;
+filter:
+    drop-shadow(0 0 24px oklch(96% 0.01 60 / 0.28))     /* tight halo */
+    drop-shadow(0 0 64px oklch(96% 0.01 60 / 0.14))     /* wide halo */
+    drop-shadow(0 6px 20px oklch(0% 0 0 / 0.55));        /* depth */
+animation: titleBreathe 6s ease-in-out infinite;
+```
+
+Notes:
+- Use `filter: drop-shadow(...)` *not* `text-shadow`. The text is filled by a
+  background-clipped gradient, and `text-shadow` does not draw under
+  transparent fills.
+- The three drop-shadows are layered intentionally: two outer luminance halos
+  (one tight, one wide — together they read as "emerging from darkness") plus
+  one black depth shadow underneath.
+- `titleBreathe` is a slow ±4% glow oscillation. Subliminal, not animated UI.
+
+### Text over photo backgrounds
+Photo screens (`#screenLanding`, `#screenWaitingRoom`) need three legibility
+tricks together — none works alone:
+
+1. **Stronger overlay.** The radial gradient runs from ~70% opacity at the
+   centre to ~96% at the edges. Centre-heavy because that's where the title
+   and body sit.
+2. **Solid (no-alpha) text colour.** `--c-text-dim` is solid `oklch(82%)` on
+   these screens, not the translucent base. Translucent text over a busy photo
+   loses local contrast on bright foam tips.
+3. **Per-glyph dark halo.** Body, subtitle, hint, stage tag, italics, and
+   strong all carry `text-shadow: 0 1px 2px oklch(0% 0 0 / 0.7), 0 0 12px
+   oklch(0% 0 0 / 0.45)`. This re-darkens the photo locally beneath each
+   glyph so every letter is readable regardless of what's behind it.
+
+These rules are appended near the photo-background block in `style.css` and
+selectively applied via `#screenLanding`/`#screenWaitingRoom` prefixes so
+text elsewhere stays clean.
 
 ### Back navigation
 - Any screen that visitors might want to leave should carry a
