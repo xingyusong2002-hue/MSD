@@ -12,23 +12,48 @@
 }
 
 :root {
-    --color-bg: #050508;
-    --color-surface: rgba(255, 255, 255, 0.04);
-    --color-surface-hover: rgba(255, 255, 255, 0.08);
-    --color-text: #e0e0e8;
-    --color-text-dim: rgba(255, 255, 255, 0.4);
-    --color-red: #ff3355;
-    --color-green: #33ff88;
-    --color-blue: #3388ff;
-    --color-red-dim: rgba(255, 51, 85, 0.3);
-    --color-green-dim: rgba(51, 255, 136, 0.3);
-    --color-blue-dim: rgba(51, 136, 255, 0.3);
-    --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    /* Typography — see DESIGN.md.
+       Plus Jakarta Sans: body + UI. Calm, readable, humanist sans.
+       Space Grotesk: display / titles. Distinct character at large sizes.
+       Newsreader (italic only): reserved for reflective/quote moments. */
+    --font-body:    'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-italic:  'Newsreader', Georgia, serif;
+    /* Legacy alias — kept so existing references keep working until migrated. */
+    --font-main:    var(--font-body);
+
+    /* OKLCH palette (see DESIGN.md). Perceptually uniform; tweak L without
+       changing perceived hue. Falls back to nothing on browsers < 2022, which
+       we don't need to support for this MVP. */
+    --c-bg:        oklch(11% 0.012 60);        /* deep warm near-black */
+    --c-surface:   oklch(100% 0 0 / 0.04);     /* faint glass */
+    --c-surface-h: oklch(100% 0 0 / 0.08);     /* hover */
+    --c-text:      oklch(96% 0.01 60);         /* warm off-white */
+    --c-text-dim:  oklch(72% 0.01 60 / 0.7);   /* subdued caption */
+    --c-border:    oklch(100% 0 0 / 0.08);
+    --c-red:       oklch(65% 0.22 25);
+    --c-green:     oklch(85% 0.20 155);
+    --c-blue:      oklch(65% 0.18 250);
+
+    /* Legacy aliases — older rules keep referring to these; new rules should
+       prefer the OKLCH `--c-*` tokens above. */
+    --color-bg: var(--c-bg);
+    --color-surface: var(--c-surface);
+    --color-surface-hover: var(--c-surface-h);
+    --color-text: var(--c-text);
+    --color-text-dim: var(--c-text-dim);
+    --color-red: var(--c-red);
+    --color-green: var(--c-green);
+    --color-blue: var(--c-blue);
+    --color-red-dim: oklch(65% 0.22 25 / 0.3);
+    --color-green-dim: oklch(85% 0.20 155 / 0.3);
+    --color-blue-dim: oklch(65% 0.18 250 / 0.3);
+
     --radius: 14px;
     --radius-sm: 8px;
     --radius-lg: 20px;
-    --glass-bg: rgba(10, 10, 18, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.06);
+    --glass-bg: oklch(8% 0.005 60 / 0.7);
+    --glass-border: oklch(100% 0 0 / 0.06);
     --glass-blur: blur(20px);
 }
 
@@ -83,35 +108,46 @@ body {
     padding: 20px;
 }
 
-/* ---- Title ---- */
+/* ---- Title ----
+   Quiet, museum-poster typography. Single warm off-white, generous tracking,
+   no rainbow gradient — the gameplay is colourful enough; the entrance should
+   feel still. Space Grotesk has enough character at this size to carry it. */
 .title {
-    font-size: clamp(2.2rem, 6vw, 4.2rem);
+    font-family: var(--font-display);
+    font-size: clamp(2.4rem, 6.5vw, 4.6rem);
     font-weight: 300;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    background: linear-gradient(135deg, var(--color-red), var(--color-blue), var(--color-green));
-    background-size: 200% 200%;
+    color: var(--c-text);
+    margin-bottom: 0.5em;
+    /* Subtle, monochromatic vertical sheen for depth without colour noise. */
+    background: linear-gradient(180deg, oklch(98% 0.005 60), oklch(82% 0.012 60));
     -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
     background-clip: text;
-    animation: gradientShift 4s ease infinite;
-    margin-bottom: 0.4em;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
 }
 
 .subtitle {
+    font-family: var(--font-body);
     font-size: 1.05rem;
     font-weight: 300;
-    color: var(--color-text-dim);
-    letter-spacing: 0.06em;
-    margin-bottom: 2.5em;
+    color: var(--c-text-dim);
+    letter-spacing: 0.04em;
+    margin-bottom: 2.8em;
+    max-width: 32ch;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
 }
 
 .screen-title {
-    font-size: clamp(1.5rem, 4vw, 2.4rem);
+    font-family: var(--font-display);
+    font-size: clamp(1.6rem, 4.5vw, 2.6rem);
     font-weight: 300;
     letter-spacing: 0.08em;
-    margin-bottom: 0.3em;
-    color: var(--color-text);
+    margin-bottom: 0.35em;
+    color: var(--c-text);
 }
 
 .screen-subtitle {
@@ -1085,10 +1121,26 @@ body {
 
 .reflection {
     text-align: center;
-    color: var(--color-text-dim);
+    color: var(--c-text-dim);
     font-size: 0.95rem;
     line-height: 1.6;
     margin-top: 1.4em;
+}
+.reflection em {
+    font-family: var(--font-italic);
+    font-style: italic;
+    font-size: 1.1rem;
+    color: var(--c-text);
+}
+
+/* Back-to-start button — anchored top-left of any screen that opts in. */
+.screen-back {
+    position: absolute;
+    top: 22px;
+    left: 22px;
+    z-index: 10;
+    padding: 8px 18px;
+    font-size: 0.85rem;
 }
 
 .archive-trace {

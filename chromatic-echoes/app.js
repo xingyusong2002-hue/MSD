@@ -26,6 +26,7 @@
     const btnAdvanceToDeadRoom = document.getElementById('btnAdvanceToDeadRoom');
     const btnBackToWaiting = document.getElementById('btnBackToWaiting');
     const btnArchiveNewSession = document.getElementById('btnArchiveNewSession');
+    const btnWaitingBack = document.getElementById('btnWaitingBack');
     const btnHost = document.getElementById('btnHost');
     const btnJoin = document.getElementById('btnJoin');
     const roleCards = document.querySelectorAll('.role-card');
@@ -483,6 +484,13 @@
     btnStartRound.addEventListener('click', () => send({ type: 'start_round' }));
     btnNextRound.addEventListener('click', () => send({ type: 'next_round' }));
     btnEndRound.addEventListener('click', () => send({ type: 'end_round' }));
+
+    // Waiting Room "← Back to start" — drop role + reconnect to land on Landing.
+    btnWaitingBack.addEventListener('click', () => {
+        myRole = null;
+        if (ws) ws.close();  // server cleans up via its on('close') handler
+        showScreen('landing');
+    });
 
     // Museum walkthrough — stage transitions (host only; server enforces the role check too)
     btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));
