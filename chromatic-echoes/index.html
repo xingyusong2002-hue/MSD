@@ -69,6 +69,13 @@
         </div>
     </div>
 
+    <!-- Tiny connection-status indicator. Sits top-right of every screen so
+         the user can always see whether the WebSocket is reachable. -->
+    <div id="connStatus" class="conn-status conn-status--connecting" aria-live="polite">
+        <span class="conn-dot"></span>
+        <span id="connStatusText" class="conn-text">Connecting…</span>
+    </div>
+
     <!-- ===== SCREEN: Landing ===== -->
     <div id="screenLanding" class="screen active">
         <div class="screen-content">

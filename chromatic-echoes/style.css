@@ -1260,6 +1260,54 @@ body {
     left: 170px;
 }
 
+/* ---- Connection-status indicator ----
+   Top-right pill. Three states: connecting (amber dot), open (green), closed
+   (red). Always visible so the user never has to guess whether a click was
+   silently swallowed by a missing server. */
+.conn-status {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--c-text-dim);
+    pointer-events: none;
+}
+.conn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: oklch(70% 0.18 70);   /* amber */
+    box-shadow: 0 0 8px oklch(70% 0.18 70 / 0.7);
+    animation: connPulse 1.2s ease-in-out infinite;
+}
+.conn-status--open .conn-dot {
+    background: oklch(75% 0.18 150);  /* green */
+    box-shadow: 0 0 8px oklch(75% 0.18 150 / 0.7);
+    animation: none;
+}
+.conn-status--closed .conn-dot {
+    background: oklch(65% 0.22 25);   /* red */
+    box-shadow: 0 0 8px oklch(65% 0.22 25 / 0.7);
+    animation: connPulse 0.7s ease-in-out infinite;
+}
+.conn-status--open { color: var(--c-text-dim); }
+.conn-status--closed { color: var(--c-text); }
+@keyframes connPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
 /* ---- Live microphone meter (player wait screen) ----
    Runs as soon as initAudio() succeeds so the visitor can verify their mic
    is being heard *before* the host starts the round. The thin track + a

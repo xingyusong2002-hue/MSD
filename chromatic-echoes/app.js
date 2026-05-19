@@ -275,15 +275,90 @@
     }
 
     // ---- WebSocket ----
+    // Connection-status indicator + outgoing message queue.
+    // The previous send() silently dropped messages when ws.readyState !== 1
+    // (OPEN). That's the bug that made the "Start as Host" button look dead
+    // whenever the user clicked before the WS handshake finished or after
+    // the server had died. Now: track the state, surface it on screen, and
+    // queue messages while CONNECTING so they fire the moment we're open.
+    const connStatus = document.getElementById('connStatus');
+    const connStatusText = document.getElementById('connStatusText');
+    let pendingSends = [];          // [{msg, queuedAt}] — replayed on open
+    let lastWsState = 'connecting'; // 'connecting' | 'open' | 'closed'
+
+    function setConnStatus(state) {
+        if (state === lastWsState) return;
+        lastWsState = state;
+        if (!connStatus) return;
+        connStatus.classList.toggle('conn-status--connecting', state === 'connecting');
+        connStatus.classList.toggle('conn-status--open',       state === 'open');
+        connStatus.classList.toggle('conn-status--closed',     state === 'closed');
+        if (connStatusText) {
+            connStatusText.textContent =
+                state === 'open'       ? 'Connected'
+              : state === 'connecting' ? 'Connecting…'
+              :                          'Server unreachable';
+        }
+    }
+
     function connectWS() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        setConnStatus('connecting');
         ws = new WebSocket(`${protocol}//${location.host}`);
-        ws.onopen = () => console.log('Connected');
+        ws.onopen = () => {
+            console.log('WS open');
+            setConnStatus('open');
+            // Drain queued sends. Each entry decides on its own whether it's
+            // still relevant via shouldReplayPendingSend() (defined below).
+            const now = Date.now();
+            const drained = pendingSends;
+            pendingSends = [];
+            for (const item of drained) {
+                if (shouldReplayPendingSend(item.msg, now - item.queuedAt)) {
+                    try { ws.send(JSON.stringify(item.msg)); } catch (e) { console.warn(e); }
+                } else {
+                    console.log('Dropped stale queued message:', item.msg);
+                }
+            }
+        };
         ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
-        ws.onclose = () => { console.log('Disconnected'); setTimeout(connectWS, 2000); };
+        ws.onclose = () => {
+            console.log('WS closed');
+            setConnStatus('closed');
+            setTimeout(connectWS, 2000);
+        };
         ws.onerror = (e) => console.error('WS error:', e);
     }
-    function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+    // Sends a message to the server.
+    //   - If WS is OPEN → send immediately.
+    //   - If WS is CONNECTING → queue, will be drained in onopen.
+    //   - If WS is CLOSED/CLOSING → queue and trigger an early reconnect.
+    function send(msg) {
+        if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify(msg));
+            return;
+        }
+        // Not open yet — queue and let onopen replay (or drop, depending on
+        // shouldReplayPendingSend()).
+        pendingSends.push({ msg, queuedAt: Date.now() });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // DECISION POINT (this is the bit I'd like you to write — see chat).
+    // Should a click that was queued `ageMs` milliseconds ago still fire
+    // when the WebSocket finally connects?
+    //
+    // @param {object} msg     the queued message, e.g. {type:'join', role:'host'}
+    // @param {number} ageMs   how long ago it was queued, in milliseconds
+    // @returns {boolean}      true → replay; false → drop
+    //
+    // TODO: replace the body with your policy. The default below replays
+    // everything regardless of age (simplest, most surprising on stale clicks).
+    // ─────────────────────────────────────────────────────────────────────
+    function shouldReplayPendingSend(msg, ageMs) {
+        return true;
+    }
 
     // ---- Message Handling ----
     function handleMessage(msg) {
