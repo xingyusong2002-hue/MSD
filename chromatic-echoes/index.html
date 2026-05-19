@@ -110,57 +110,19 @@
         </div>
     </div>
 
-    <!-- ===== SCREEN: Player Setup (name + sound role, before colour pick) ===== -->
-    <div id="screenPlayerSetup" class="screen">
-        <button id="btnSetupBack" class="btn btn-ghost screen-back">← Back</button>
-        <div class="screen-content">
-            <h2 class="screen-title">Before you step in</h2>
-            <p class="screen-subtitle">Two quick questions</p>
-
-            <div class="setup-block">
-                <label class="setup-label" for="playerNameInput">Your name (optional)</label>
-                <input id="playerNameInput" class="setup-input" type="text" autocomplete="off"
-                       maxlength="40" placeholder="e.g. Mira" />
-            </div>
-
-            <div class="setup-block">
-                <span class="setup-label">How will you make sound?</span>
-                <div class="sound-role-grid">
-                    <button class="sound-role-card" data-sound-role="voice">
-                        <span class="sr-name">Voice</span>
-                        <span class="sr-hint">talk, sing</span>
-                    </button>
-                    <button class="sound-role-card" data-sound-role="hum">
-                        <span class="sr-name">Hum</span>
-                        <span class="sr-hint">long, low</span>
-                    </button>
-                    <button class="sound-role-card" data-sound-role="clap">
-                        <span class="sr-name">Clap</span>
-                        <span class="sr-hint">short, sharp</span>
-                    </button>
-                    <button class="sound-role-card" data-sound-role="whisper">
-                        <span class="sr-name">Whisper</span>
-                        <span class="sr-hint">soft, breathy</span>
-                    </button>
-                    <button class="sound-role-card" data-sound-role="micro-sound">
-                        <span class="sr-name">Micro-sound</span>
-                        <span class="sr-hint">tap, click, tiny</span>
-                    </button>
-                </div>
-            </div>
-
-            <button id="btnSetupContinue" class="btn btn-primary" disabled>
-                <span class="btn-text">Continue →</span>
-            </button>
-            <p class="hint">You can change either of these later.</p>
-        </div>
-    </div>
-
-    <!-- ===== SCREEN: Role Selection ===== -->
+    <!-- ===== SCREEN: Role Selection (now also the museum intro) =====
+         The previous Player Setup screen (name + sound-role) was removed: the
+         choices weren't meaningfully used in the visualisation and the page
+         felt like a sign-up form. The walkthrough copy lives here instead so
+         the visitor reaches the colour cards in one tap from Landing. -->
     <div id="screenRoles" class="screen">
         <div class="screen-content">
-            <h2 class="screen-title">Choose Your Color</h2>
-            <p class="screen-subtitle">Pick a color channel to control with your voice</p>
+            <h2 class="screen-title">Enter the Dead Room Sound Playground</h2>
+            <p class="roles-intro">
+                Make any sound — speak, hum, clap, whisper, or move.<br>
+                Inside the Dead Room, your sound becomes a coloured wave.
+            </p>
+            <p class="screen-subtitle">Choose your colour</p>
             <div class="role-cards">
                 <button id="roleRed" class="role-card role-red" data-role="red">
                     <div class="role-orb"></div>
@@ -248,19 +210,6 @@
                 <span id="micMeterStatus" class="mic-meter-status">no mic</span>
             </div>
 
-            <!-- Manual zone picker — no GPS. The visitor taps the quadrant
-                 they're currently standing in so the projection can anchor
-                 their colour at the right spot. Stays usable mid-round
-                 (Move Echo). -->
-            <div class="zone-picker" data-context="wait">
-                <span class="zone-picker-label">Where are you in the room?</span>
-                <div class="zone-grid">
-                    <button class="zone-btn" data-zone="A" aria-label="Zone A — top-left">A</button>
-                    <button class="zone-btn" data-zone="B" aria-label="Zone B — top-right">B</button>
-                    <button class="zone-btn zone-btn--center" data-zone="Center" aria-label="Center">Center</button>
-                    <button class="zone-btn" data-zone="C" aria-label="Zone C — bottom-centre">C</button>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -299,6 +248,20 @@
         <div id="hudEmptyHint" class="hud-empty-hint hidden">
             <p class="hud-empty-title">No players connected</p>
             <p class="hud-empty-text">Open a second window, click <b>Join Game</b>, and pick a colour to bring the room to life.</p>
+        </div>
+
+        <!-- Move-Echo zone picker — appears INSIDE the game HUD, only when
+             the current round kind is 'move' AND this tab is a player.
+             Hidden by default; toggled on from updateFromState. Mirrors
+             the same .zone-btn class so the existing event wiring works. -->
+        <div id="hudZonePicker" class="hud-zone-picker hidden" data-context="hud">
+            <span class="zone-picker-label">Move to a zone</span>
+            <div class="zone-grid">
+                <button class="zone-btn" data-zone="A" aria-label="Zone A — top-left">A</button>
+                <button class="zone-btn" data-zone="B" aria-label="Zone B — top-right">B</button>
+                <button class="zone-btn zone-btn--center" data-zone="Center" aria-label="Center">Center</button>
+                <button class="zone-btn" data-zone="C" aria-label="Zone C — bottom-centre">C</button>
+            </div>
         </div>
 
         <!-- Player-only "transmitting" pill — shows on the game HUD that

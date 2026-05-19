@@ -1572,74 +1572,20 @@ body {
    MVP Phase 2 — Visitor: Setup, Zone Picker
    ============================================ */
 
-/* ---- Player Setup screen (name + sound role) ---- */
-.setup-block {
-    margin: 0 auto 1.6em;
-    max-width: 460px;
-    text-align: left;
-}
-.setup-label {
-    display: block;
-    font-family: var(--font-body);
-    font-size: 0.78rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--c-text-dim);
-    margin-bottom: 0.65em;
-}
-.setup-input {
-    width: 100%;
-    padding: 12px 16px;
-    border-radius: 999px;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    color: var(--c-text);
+/* ---- Roles screen intro paragraph (museum-flow simplification) ----
+   The previous Player Setup screen was removed (no name / sound-role
+   questions). The visitor now reads a short instruction directly on the
+   colour-picker screen, then taps a colour. Three taps from Landing to
+   playing: Join Game → Colour → Allow mic. */
+.roles-intro {
     font-family: var(--font-body);
     font-size: 1rem;
-    outline: none;
-    transition: border-color 0.2s ease;
-}
-.setup-input:focus {
-    border-color: oklch(100% 0 0 / 0.25);
-}
-
-.sound-role-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-    gap: 10px;
-}
-.sound-role-card {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
+    font-weight: 300;
+    line-height: 1.6;
     color: var(--c-text);
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.2s ease;
-    font-family: var(--font-body);
-}
-.sound-role-card:hover {
-    border-color: oklch(100% 0 0 / 0.18);
-    transform: translateY(-1px);
-}
-.sound-role-card.active {
-    background: oklch(100% 0 0 / 0.08);
-    border-color: oklch(100% 0 0 / 0.3);
-}
-.sound-role-card .sr-name {
-    font-size: 0.95rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-}
-.sound-role-card .sr-hint {
-    font-size: 0.72rem;
-    color: var(--c-text-dim);
-    letter-spacing: 0.04em;
+    max-width: 480px;
+    margin: 0.4em auto 1.6em;
+    letter-spacing: 0.01em;
 }
 
 /* ---- Zone picker (manual room-position selector) ----
@@ -1691,6 +1637,33 @@ body {
 }
 .zone-btn--center {
     grid-column: span 2;       /* full-width middle row */
+}
+
+/* ---- HUD zone picker (Move Echo only) ----
+   Compact pill anchored bottom-centre of the projection HUD. Shown only
+   when the round kind is 'move' AND this tab is a player (handled in
+   updateFromState). Above the player-bars row so it doesn't collide. */
+.hud-zone-picker {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 90px;
+    z-index: 5;
+    padding: 10px 16px;
+    border-radius: 18px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    max-width: min(360px, 86vw);
+    width: 320px;
+    text-align: center;
+}
+.hud-zone-picker .zone-picker-label {
+    margin-bottom: 0.6em;
+}
+.hud-zone-picker .zone-btn {
+    padding: 10px 0;       /* slightly tighter than the wait-screen version */
+    font-size: 0.88rem;
 }
 
 /* ============================================

@@ -9,7 +9,6 @@
     const canvas = document.getElementById('rippleCanvas');
     const ctx = canvas.getContext('2d');
     const screenLanding = document.getElementById('screenLanding');
-    const screenPlayerSetup = document.getElementById('screenPlayerSetup');
     const screenRoles = document.getElementById('screenRoles');
     const screenLobby = document.getElementById('screenLobby');
     const screenPlayerWait = document.getElementById('screenPlayerWait');
@@ -17,10 +16,10 @@
     const screenWaitingRoom = document.getElementById('screenWaitingRoom');
     const screenThreshold = document.getElementById('screenThreshold');
     const screenArchive = document.getElementById('screenArchive');
-    const playerNameInput = document.getElementById('playerNameInput');
-    const soundRoleCards = document.querySelectorAll('.sound-role-card');
-    const btnSetupContinue = document.getElementById('btnSetupContinue');
-    const btnSetupBack = document.getElementById('btnSetupBack');
+    // Zone picker now lives inside the game HUD (#hudZonePicker), used only
+    // during Move Echo. The previous Player Setup screen (name + sound role
+    // + upfront zone) was removed as part of the museum-flow simplification.
+    const hudZonePicker = document.getElementById('hudZonePicker');
     const zoneButtons = document.querySelectorAll('.zone-btn');
     const gameHud = document.getElementById('gameHud');
     const stageToolbar = document.getElementById('stageToolbar');
@@ -101,34 +100,49 @@
         volumeThreshold: 0.008,        // mic gating threshold (audio side, RMS)
         volumeMax: 0.30,                // mic ceiling
         trailAlpha: 0.06,               // canvas trail darkening per frame
-        // ---- New event-driven emitter (replaces the old pool) ----
-        volumeThresholdVisual: 0.04,    // below this, NO particles spawn for that role
-        particlesPerFramePerVolume: 6,  // max particles per frame at volume=1
-        particleMaxSpeed: 4,
-        particleMinSize: 1,
-        particleMaxSize: 5,
-        particleBaseLifetime: 90,       // frames (~1.5s) at volume=0; longer at higher volume
-        particleCenterPull: 0.06,       // px/frame² acceleration toward mix centre
-        particleDamping: 0.985,         // per-frame velocity damping
-        // ---- Source cloud (existing, kept for the "anchor glow") ----
+        // ---- Event-driven particle emitter (secondary texture layer) ----
+        // The wavefront rings below are now the primary visual; particles
+        // are a soft texture underneath. Smaller, more numerous, lower
+        // alpha so they read as "fine dust" rather than chunky dots.
+        volumeThresholdVisual: 0.04,    // below this, NO new particles spawn
+        particlesPerFramePerVolume: 10, // more particles, but each is small + faint
+        particleMaxSpeed: 3.2,
+        particleMinSize: 0.5,           // was 1 — smoother
+        particleMaxSize: 2.2,           // was 5 — much less chunky
+        particleBaseLifetime: 120,      // frames; slightly longer for soft fade
+        particleCenterPull: 0.05,       // applied ONLY in Mix Echo (see shouldUseCenterPull)
+        particleDamping: 0.985,
+        particleAlphaMin: 0.18,         // base alpha lower bound (was 0.55)
+        particleAlphaMax: 0.42,         // upper bound (was ~0.9)
+        // ---- Source cloud (anchor glow at the player's zone) ----
         cloudBaseRadius: 90,
         cloudMaxRadius: 200,
         cloudLayers: 5,
-        cloudMinOpacity: 0.22,
-        cloudMaxOpacity: 0.55,
-        // ---- Source pulse rings — primary "proof it works" visual ----
-        // Tuned to be impossible to miss: rings travel far, start bright, fade
-        // slowly, and are thick enough to read from across a room.
-        ringMinCooldownMs: 110,         // min gap between spawns at full volume
-        ringMaxCooldownMs: 380,         // gap at threshold volume
-        ringBaseRadius: 24,             // start radius (small, so they "appear" at the source)
-        ringTravel: 420,                // total expansion before fade-out
-        ringTravelSec: 1.6,             // seconds to reach max radius
-        ringStartAlphaMin: 0.55,        // alpha at threshold volume
-        ringStartAlphaMax: 0.95,        // alpha at full volume
-        ringLineMin: 4,                 // stroke width at end of life
-        ringLineMax: 9                  // stroke width at birth
+        cloudMinOpacity: 0.18,
+        cloudMaxOpacity: 0.48,
+        // ---- Source pulse rings — PRIMARY visual, the "sound wavefront" ----
+        // Thinner, softer, more frequent — so consecutive rings overlap into
+        // a continuous expanding wavefront rather than reading as discrete
+        // warning circles. The "stone in pond" effect.
+        ringMinCooldownMs: 70,          // ring spawns ~14/s at full volume
+        ringMaxCooldownMs: 240,         // ~4/s at threshold volume
+        ringBaseRadius: 18,             // start small at the source
+        ringTravel: 460,                // long expansion so they reach far
+        ringTravelSec: 1.8,             // slow expansion = elegant
+        ringStartAlphaMin: 0.28,        // softer at low volume
+        ringStartAlphaMax: 0.62,        // softer at full volume (was 0.95)
+        ringLineMin: 1.2,               // very thin at end of life
+        ringLineMax: 3.0,               // thin even at birth (was 9 = "warning")
     };
+
+    // Which rounds should pull particles toward the centre mix point?
+    // Only Mix Echo — where the *meaning* of the centre is "blend your
+    // colours together". Solo, Move, and Silent are about each individual's
+    // sound spreading outward through the room; pulling those particles to
+    // the centre would feel like the room is sucking the sound away.
+    function shouldUseCenterPull(kind) {
+        return kind === 'mix';
+    }
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
@@ -141,13 +155,11 @@
     // Pulled from the state broadcast; drives label text, zone-based source
     // positions, and the contribution panel.
     let playersInfo = [];
-    // Visitor's own choices, filled in across the Setup → Roles → Wait flow.
-    // myZone is empty until the visitor explicitly taps a zone button — that
-    // way we don't accidentally send 'Center' on join, which would override
-    // the server's per-role default (Red→A, Green→B, Blue→C). The wait-
-    // screen zone picker sets myZone the moment the visitor taps.
-    let myName = '';
-    let mySoundRole = '';
+    // Visitor's zone. Empty until they tap the in-HUD Move-Echo picker. Until
+    // then the server assigns the role-default (Red→A, Green→B, Blue→C). Name
+    // and sound-role state were removed when the Player Setup screen went
+    // away — the protocol's `name` and `soundRole` join fields are still
+    // accepted server-side but the client no longer sends them.
     let myZone = '';
     let audioCtx, analyser, timeDomainData;
 
@@ -268,18 +280,20 @@
             // Radially outward from the source with a small random arc, so
             // the ripple looks like a stone hitting water rather than a beam.
             const angle = Math.random() * Math.PI * 2;
-            const speed = 0.8 + Math.random() * CONFIG.particleMaxSpeed * (0.4 + volume);
+            const speed = 0.6 + Math.random() * CONFIG.particleMaxSpeed * (0.4 + volume);
+            const sizeRange = CONFIG.particleMaxSize - CONFIG.particleMinSize;
             activeParticles.push({
                 role,
                 color,
-                x: src.x + (Math.random() - 0.5) * 10,
-                y: src.y + (Math.random() - 0.5) * 10,
+                x: src.x + (Math.random() - 0.5) * 8,
+                y: src.y + (Math.random() - 0.5) * 8,
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
-                size: CONFIG.particleMinSize + Math.random() * CONFIG.particleMaxSize * (0.5 + volume),
-                life:    CONFIG.particleBaseLifetime * (0.7 + volume * 0.7),
-                maxLife: CONFIG.particleBaseLifetime * (0.7 + volume * 0.7),
-                alpha: 0.55 + Math.random() * 0.35,
+                size: CONFIG.particleMinSize + Math.random() * sizeRange * (0.4 + volume * 0.6),
+                life:    CONFIG.particleBaseLifetime * (0.8 + volume * 0.5),
+                maxLife: CONFIG.particleBaseLifetime * (0.8 + volume * 0.5),
+                // Lower alpha range so particles read as texture, not dots.
+                alpha: CONFIG.particleAlphaMin + Math.random() * (CONFIG.particleAlphaMax - CONFIG.particleAlphaMin),
             });
         }
     }
@@ -287,18 +301,22 @@
     function updateParticles() {
         const bounds = getMapBounds();
         const cx = mixCenter.x, cy = mixCenter.y;
+        // Centre pull ONLY in Mix Echo — where blending at the centre is
+        // the point of the round. In Solo / Move / Silent, sound should
+        // spread outward through the room instead of being "sucked in".
+        const centerPullActive = shouldUseCenterPull(currentRound && currentRound.kind);
         const next = [];
         for (let i = 0; i < activeParticles.length; i++) {
             const p = activeParticles[i];
-            // Centre drift: small acceleration toward the mix point so the
-            // ripples bend back inward, giving the "everyone's colour meets
-            // in the middle" feel of the experience.
-            const dx = cx - p.x, dy = cy - p.y;
-            const d2 = dx * dx + dy * dy;
-            if (d2 > 1) {
-                const inv = 1 / Math.sqrt(d2);
-                p.vx += dx * inv * CONFIG.particleCenterPull;
-                p.vy += dy * inv * CONFIG.particleCenterPull;
+            if (centerPullActive) {
+                // Subtle drift toward the mix point.
+                const dx = cx - p.x, dy = cy - p.y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 > 1) {
+                    const inv = 1 / Math.sqrt(d2);
+                    p.vx += dx * inv * CONFIG.particleCenterPull;
+                    p.vy += dy * inv * CONFIG.particleCenterPull;
+                }
             }
             // Tiny stochastic jitter for an organic feel.
             p.vx += (Math.random() - 0.5) * 0.08;
@@ -815,6 +833,16 @@
                 && connectedPlayers.length === 0;
             hudEmptyHint.classList.toggle('hidden', !showHint);
         }
+        // Zone picker — visitor-side ONLY, and ONLY during Move Echo. Hidden
+        // every other moment so onboarding doesn't feel like a sign-up form
+        // and Solo/Mix/Silent rounds aren't cluttered with position controls.
+        if (hudZonePicker) {
+            const showPicker = !!myRole && myRole !== 'host'
+                && experienceStage === 'dead-room'
+                && s.phase === 'playing'
+                && currentRound && currentRound.kind === 'move';
+            hudZonePicker.classList.toggle('hidden', !showPicker);
+        }
 
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
     }
@@ -955,12 +983,12 @@
     }
 
     // ---- Screen Management ----
-    const screens = [screenLanding, screenPlayerSetup, screenRoles, screenLobby, screenPlayerWait, screenSuccess,
+    const screens = [screenLanding, screenRoles, screenLobby, screenPlayerWait, screenSuccess,
                      screenWaitingRoom, screenThreshold, screenArchive];
     function showScreen(name) {
         screens.forEach(s => s.classList.remove('active'));
         const map = {
-            landing: screenLanding, setup: screenPlayerSetup, roles: screenRoles, lobby: screenLobby,
+            landing: screenLanding, roles: screenRoles, lobby: screenLobby,
             playerWait: screenPlayerWait, success: screenSuccess,
             waitingRoom: screenWaitingRoom, threshold: screenThreshold, archive: screenArchive,
         };
@@ -1042,28 +1070,12 @@
 
     // ---- Events ----
     btnHost.addEventListener('click', () => { send({ type: 'join', role: 'host' }); lobbyUrl.textContent = location.href; });
-    btnJoin.addEventListener('click', () => showScreen('setup'));   // setup BEFORE colour pick
+    btnJoin.addEventListener('click', () => showScreen('roles'));   // direct to colour pick
     btnBackToLanding.addEventListener('click', () => showScreen('landing'));
-    btnSetupBack.addEventListener('click', () => showScreen('landing'));
-
-    // ---- Player Setup wiring ----
-    // Continue is enabled only once a sound role is picked. Name is optional.
-    function updateSetupContinueState() {
-        btnSetupContinue.disabled = !mySoundRole;
-    }
-    soundRoleCards.forEach(card => {
-        card.addEventListener('click', () => {
-            mySoundRole = card.dataset.soundRole;
-            soundRoleCards.forEach(c => c.classList.toggle('active', c === card));
-            updateSetupContinueState();
-        });
-    });
-    playerNameInput.addEventListener('input', () => { myName = playerNameInput.value.trim().slice(0, 40); });
-    btnSetupContinue.addEventListener('click', () => showScreen('roles'));
 
     // ---- Zone picker wiring ----
-    // Updates local UI immediately and tells the server. Server broadcasts
-    // zones to everyone so the projection moves the player's dot.
+    // The picker now lives inside #gameHud and is only displayed during the
+    // Move Echo round (visitor side). Same .zone-btn class, same handlers.
     function applyZone(zone) {
         if (!ZONES.includes(zone)) return;
         myZone = zone;
@@ -1071,25 +1083,15 @@
         if (myRole && myRole !== 'host') send({ type: 'set_zone', zone });
     }
     zoneButtons.forEach(b => b.addEventListener('click', () => applyZone(b.dataset.zone)));
-    // No default highlight — the visitor's zone is whatever the server
-    // assigned them (per-role default: Red→A, Green→B, Blue→C) until they
-    // tap a button to change it. updateFromState() will reflect the
-    // current zone in the picker via the broadcast.
 
     roleCards.forEach(card => {
         card.addEventListener('click', async () => {
             if (card.disabled) return;
             const ok = await initAudio(); if (!ok) return;
-            // Send everything we know about the visitor in the join — name +
-            // sound role (gathered on Setup) + zone (defaulting to Center
-            // until they tap a zone button on the wait screen).
-            send({
-                type: 'join',
-                role: card.dataset.role,
-                name: myName,
-                soundRole: mySoundRole,
-                zone: myZone,
-            });
+            // No name / sound-role any more — the museum-flow simplification
+            // removed those upfront questions. Zone is omitted too so the
+            // server falls back to the role-default (Red→A, Green→B, Blue→C).
+            send({ type: 'join', role: card.dataset.role });
         });
     });
 
