@@ -69,9 +69,18 @@
     const barRed = document.getElementById('barRed');
     const barGreen = document.getElementById('barGreen');
     const barBlue = document.getElementById('barBlue');
+    const barPurple = document.getElementById('barPurple');
     const barRedVal = document.getElementById('barRedVal');
     const barGreenVal = document.getElementById('barGreenVal');
     const barBlueVal = document.getElementById('barBlueVal');
+    const barPurpleVal = document.getElementById('barPurpleVal');
+    // Live-share-of-mix readouts. Per-role normalised contribution.
+    const shareEls = {
+        red:    document.getElementById('shareRed'),
+        green:  document.getElementById('shareGreen'),
+        blue:   document.getElementById('shareBlue'),
+        purple: document.getElementById('sharePurple'),
+    };
     const roundNum = document.getElementById('roundNum');
     const roundTotal = document.getElementById('roundTotal');
     const roundKindTag = document.getElementById('roundKindTag');
@@ -587,9 +596,31 @@
             smoothVolumes[c] += (t - smoothVolumes[c]) * 0.2;
         }
 
-        const rv = Math.round(smoothVolumes.red * 100), gv = Math.round(smoothVolumes.green * 100), bv = Math.round(smoothVolumes.blue * 100);
-        barRed.style.width = rv + '%'; barGreen.style.width = gv + '%'; barBlue.style.width = bv + '%';
-        barRedVal.textContent = rv + '%'; barGreenVal.textContent = gv + '%'; barBlueVal.textContent = bv + '%';
+        // Raw-volume bars (visual liveness: "yes, you're heard").
+        const rv = Math.round(smoothVolumes.red * 100);
+        const gv = Math.round(smoothVolumes.green * 100);
+        const bv = Math.round(smoothVolumes.blue * 100);
+        const pv = Math.round(smoothVolumes.purple * 100);
+        barRed.style.width    = rv + '%';
+        barGreen.style.width  = gv + '%';
+        barBlue.style.width   = bv + '%';
+        barPurple.style.width = pv + '%';
+        barRedVal.textContent    = rv + '%';
+        barGreenVal.textContent  = gv + '%';
+        barBlueVal.textContent   = bv + '%';
+        barPurpleVal.textContent = pv + '%';
+
+        // Live contribution % — each role's share of the total raw volume
+        // across all four colours. "— of mix" while everyone is silent.
+        const totalRaw = rv + gv + bv + pv;
+        for (const role of ROLES) {
+            const el = shareEls[role];
+            if (!el) continue;
+            if (totalRaw < 1) { el.textContent = '— of mix'; continue; }
+            const myRaw = role === 'red' ? rv : role === 'green' ? gv : role === 'blue' ? bv : pv;
+            const pct = Math.round((myRaw / totalRaw) * 100);
+            el.textContent = pct + '% of mix';
+        }
 
         // Mix-only: target box, mixing fill, match-progress border. CSS hides these
         // elements for other kinds, but skipping the DOM writes avoids flicker too.

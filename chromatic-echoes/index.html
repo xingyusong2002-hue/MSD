@@ -261,6 +261,20 @@
 
     <!-- ===== GAME HUD ===== -->
     <div id="gameHud" class="game-hud hidden" data-kind="mix">
+        <!-- 2D map of the Dead Room: faint quadrant grid + zone labels.
+             Sits behind the canvas particles; gives visitors a sense of
+             "this is the room you are standing in" rather than abstract
+             dots floating in black. Pointer-events:none so it doesn't
+             intercept HUD button clicks. -->
+        <div id="deadRoomMap" class="dead-room-map" aria-hidden="true">
+            <div class="drm-grid">
+                <div class="drm-cell drm-zone-a"><span class="drm-zone-label">A</span></div>
+                <div class="drm-cell drm-zone-b"><span class="drm-zone-label">B</span></div>
+                <div class="drm-cell drm-zone-c"><span class="drm-zone-label">C</span></div>
+            </div>
+            <div class="drm-center"><span class="drm-zone-label">Center</span></div>
+        </div>
+
         <!-- Host-only exit button (back to Landing). Hidden for players. -->
         <button id="btnHudExit" class="btn btn-ghost screen-back hidden">← Exit to start</button>
 
@@ -313,28 +327,45 @@
             </div>
         </div>
 
-        <!-- Player volume bars (bottom) -->
+        <!-- Player volume bars + live contribution % (bottom).
+             Each row: colour label · raw-volume bar · "X% of mix" share.
+             Bar width = how loud that phone is now. Percent = that
+             colour's share of the centre mix at this moment. The two are
+             different signals (loudness vs. relative balance) and both
+             are useful: bar tells the visitor "you're being heard"; share
+             tells the group "we're 50/30/20 right now". -->
         <div class="player-bars">
             <div class="pbar pbar-red">
-                <span class="pbar-label">🔴 Red</span>
+                <span class="pbar-label">Red</span>
                 <div class="pbar-track">
                     <div id="barRed" class="pbar-fill pbar-fill-red"></div>
                 </div>
                 <span id="barRedVal" class="pbar-val">0%</span>
+                <span id="shareRed" class="pbar-share">— of mix</span>
             </div>
             <div class="pbar pbar-green">
-                <span class="pbar-label">🟢 Green</span>
+                <span class="pbar-label">Green</span>
                 <div class="pbar-track">
                     <div id="barGreen" class="pbar-fill pbar-fill-green"></div>
                 </div>
                 <span id="barGreenVal" class="pbar-val">0%</span>
+                <span id="shareGreen" class="pbar-share">— of mix</span>
             </div>
             <div class="pbar pbar-blue">
-                <span class="pbar-label">🔵 Blue</span>
+                <span class="pbar-label">Blue</span>
                 <div class="pbar-track">
                     <div id="barBlue" class="pbar-fill pbar-fill-blue"></div>
                 </div>
                 <span id="barBlueVal" class="pbar-val">0%</span>
+                <span id="shareBlue" class="pbar-share">— of mix</span>
+            </div>
+            <div class="pbar pbar-purple">
+                <span class="pbar-label">Purple</span>
+                <div class="pbar-track">
+                    <div id="barPurple" class="pbar-fill pbar-fill-purple"></div>
+                </div>
+                <span id="barPurpleVal" class="pbar-val">0%</span>
+                <span id="sharePurple" class="pbar-share">— of mix</span>
             </div>
         </div>
 
