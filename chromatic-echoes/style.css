@@ -1761,6 +1761,53 @@ body {
     position: static;
 }
 
+/* ---- Debug panel (D key toggles on host/projection) ----
+   Monospace, top-right, terminal-style. Pure diagnostic — not part of
+   the museum aesthetic. Visible only when manually toggled. */
+.debug-panel {
+    position: fixed;
+    top: 60px;
+    right: 14px;
+    z-index: 9999;
+    min-width: 280px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: oklch(8% 0.005 60 / 0.92);
+    border: 1px solid oklch(100% 0 0 / 0.12);
+    backdrop-filter: var(--glass-blur);
+    color: oklch(95% 0.01 60);
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 0.74rem;
+    line-height: 1.4;
+    pointer-events: none;
+}
+.dbg-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 2px 0;
+}
+.dbg-k {
+    color: oklch(72% 0.01 60 / 0.8);
+    letter-spacing: 0.04em;
+}
+.dbg-v {
+    color: oklch(95% 0.01 60);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.dbg-vol .dbg-v {
+    letter-spacing: 0.02em;
+}
+.dbg-hint {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed oklch(100% 0 0 / 0.08);
+    color: oklch(72% 0.01 60 / 0.6);
+    font-size: 0.68rem;
+    justify-content: center;
+}
+
 /* ---- In-HUD "transmitting" pill (player-only) ----
    Mirrors the wait-screen mic-meter into the playing screen so a player
    can see their mic is reaching the server even while the wait screen is

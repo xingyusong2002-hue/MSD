@@ -16,6 +16,21 @@
 <body>
     <canvas id="rippleCanvas"></canvas>
 
+    <!-- ===== Debug overlay (toggle with D key on the host/projection) ===== -->
+    <!-- Hidden by default; useful for live diagnosis without opening devtools. -->
+    <div id="debugPanel" class="debug-panel hidden" aria-hidden="true">
+        <div class="dbg-row"><span class="dbg-k">role</span><span id="dbgRole" class="dbg-v">—</span></div>
+        <div class="dbg-row"><span class="dbg-k">phase</span><span id="dbgPhase" class="dbg-v">—</span></div>
+        <div class="dbg-row"><span class="dbg-k">round</span><span id="dbgRound" class="dbg-v">—</span></div>
+        <div class="dbg-row"><span class="dbg-k">connected</span><span id="dbgConnected" class="dbg-v">—</span></div>
+        <div class="dbg-row dbg-vol"><span class="dbg-k">R / G / B vol</span><span id="dbgVolumes" class="dbg-v">— / — / —</span></div>
+        <div class="dbg-row dbg-vol"><span class="dbg-k">R / G / B sim</span><span id="dbgSims" class="dbg-v">— / — / —</span></div>
+        <div class="dbg-row"><span class="dbg-k">particles</span><span id="dbgParticles" class="dbg-v">R=0  G=0  B=0  total=0</span></div>
+        <div class="dbg-row"><span class="dbg-k">rings</span><span id="dbgRings" class="dbg-v">0</span></div>
+        <div class="dbg-row"><span class="dbg-k">last frame</span><span id="dbgLastFrame" class="dbg-v">—</span></div>
+        <div class="dbg-row dbg-hint"><span>D toggle · R/G/B simulate</span></div>
+    </div>
+
     <!-- ===== Host-only stage toolbar (visible inside dead-room stage) ===== -->
     <div id="stageToolbar" class="stage-toolbar hidden">
         <span class="stage-toolbar-label">Stage</span>

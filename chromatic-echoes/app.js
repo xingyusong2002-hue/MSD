@@ -97,11 +97,39 @@
     const ROLES = ['red', 'green', 'blue'];
     const ZONES = ['A', 'B', 'C', 'Center'];
     const SOUND_ROLES = ['voice', 'hum', 'clap', 'whisper', 'micro-sound'];
-    const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 110, cloudMaxRadius: 220, cloudLayers: 5, cloudMinOpacity: 0.32, cloudMaxOpacity: 0.6 };
+    const CONFIG = {
+        volumeThreshold: 0.008,        // mic gating threshold (audio side, RMS)
+        volumeMax: 0.30,                // mic ceiling
+        trailAlpha: 0.06,               // canvas trail darkening per frame
+        // ---- New event-driven emitter (replaces the old pool) ----
+        volumeThresholdVisual: 0.04,    // below this, NO particles spawn for that role
+        particlesPerFramePerVolume: 6,  // max particles per frame at volume=1
+        particleMaxSpeed: 4,
+        particleMinSize: 1,
+        particleMaxSize: 5,
+        particleBaseLifetime: 90,       // frames (~1.5s) at volume=0; longer at higher volume
+        particleCenterPull: 0.06,       // px/frame² acceleration toward mix centre
+        particleDamping: 0.985,         // per-frame velocity damping
+        // ---- Source cloud (existing, kept for the "anchor glow") ----
+        cloudBaseRadius: 90,
+        cloudMaxRadius: 200,
+        cloudLayers: 5,
+        cloudMinOpacity: 0.22,
+        cloudMaxOpacity: 0.55,
+        // ---- Source pulse rings (new) ----
+        ringMinCooldownMs: 220,         // minimum gap between ring spawns at full volume
+        ringMaxCooldownMs: 600,         // gap at threshold volume
+        ringBaseRadius: 40,             // expand from this
+        ringTravel: 220,                // max additional radius before fade-out
+        ringTravelSec: 1.4              // seconds to reach max radius
+    };
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
     let currentRound = null;
+    let currentPhase = 'lobby';  // mirror of server.phase, used by debug panel
+    let lastFrameAt = 0;          // performance.now() of the most recent 'frame' from server
+    let debugVisible = false;
     let connectedPlayers = [];  // role subset — for source labels
     // Each entry: {role, name, soundRole, zone, connected, volume}.
     // Pulled from the state broadcast; drives label text, zone-based source
@@ -158,57 +186,201 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // ---- Particles ----
-    class Particle {
-        constructor(color) { this.color = color; this.reset(true); }
-        reset(initial) {
-            const src = sourcePositions[this.color] || mixCenter;
-            this.x = src.x + (Math.random() - 0.5) * 40;
-            this.y = src.y + (Math.random() - 0.5) * 40;
-            this.size = CONFIG.particleMinSize + Math.random() * (CONFIG.particleMaxSize - CONFIG.particleMinSize);
-            this.life = 1; this.decay = 0.003 + Math.random() * 0.005;
-            this.angle = Math.atan2(mixCenter.y - src.y, mixCenter.x - src.x) + (Math.random() - 0.5) * 1.2;
-            this.speed = 0.5 + Math.random() * CONFIG.particleMaxSpeed;
-            this.opacity = 0.3 + Math.random() * 0.5;
-            if (initial) this.life = Math.random();
-        }
-        update(volume) {
-            const sp = 0.2 + volume * 2.5;
-            this.x += Math.cos(this.angle) * this.speed * sp;
-            this.y += Math.sin(this.angle) * this.speed * sp;
-            this.angle += (Math.random() - 0.5) * 0.08;
-            this.life -= this.decay * (0.5 + volume);
+    // ---- Map bounds ----
+    // The Dead Room "map" is the dashed quadrant box in style.css with
+    // inset: 6vh 6vw. Particles must die when they leave it so they don't
+    // travel forever across the whole screen.
+    function getMapBounds() {
+        const w = window.innerWidth, h = window.innerHeight;
+        const padX = w * 0.06;
+        const padY = h * 0.06;
+        return { left: padX, right: w - padX, top: padY, bottom: h - padY };
+    }
 
-            // In accumulate mode, particles slow down and "stick" near the center
-            if (gameMode === 'accumulate') {
-                const dx = this.x - mixCenter.x, dy = this.y - mixCenter.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 90) {
-                    this.speed *= 0.92; // slow down near center
-                    this.life -= 0.002; // die a bit faster when inside box
-                }
+    // ---- Event-driven particle emitter ----
+    // Replaces the old pre-allocated pool (which never depleted — particles
+    // recycled themselves the moment they died, so the screen always showed
+    // ~240 faintly-drawn particles even at silence). The new system:
+    //   • spawnSoundParticles() pushes new particles onto activeParticles
+    //   • silent roles spawn nothing, so silent = empty
+    //   • updateParticles() ages, moves and removes
+    //   • drawParticles() iterates the live list
+    // Particle shape per task spec:
+    //   { role, x, y, vx, vy, size, life, maxLife, alpha, color }
+    let activeParticles = [];
+
+    // Simulated per-role volumes for the host's R/G/B keyboard test
+    // shortcuts. These are LOCAL ONLY — they never go to the server. They
+    // exist purely so the projection can be tested without three phones.
+    let simulatedVolumes = { red: 0, green: 0, blue: 0 };
+    function simulateBurst(role) {
+        if (!ROLES.includes(role)) return;
+        simulatedVolumes[role] = 0.75;
+        // Quick attack, slow decay so it looks like a real shout.
+        setTimeout(() => { simulatedVolumes[role] = 0.45; }, 180);
+        setTimeout(() => { simulatedVolumes[role] = 0.20; }, 480);
+        setTimeout(() => { simulatedVolumes[role] = 0.00; }, 900);
+    }
+
+    // Effective per-role volume = max(real mic volume, simulated keyboard burst).
+    // Used by spawnSoundParticles + pulse rings + source-cloud sizing.
+    function effectiveVolume(role) {
+        return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
+    }
+
+    function spawnSoundParticles(role, volume, src) {
+        // Below the visual threshold, no particles at all. The pre-existing
+        // mic gating is for ANALYSIS (sending to server); this one is for
+        // VISUALS (what we paint on the projection). Higher to avoid noise.
+        if (volume < CONFIG.volumeThresholdVisual) return;
+        const color = COLORS[role];
+        if (!color || !src) return;
+        // Spawn count scales with volume. At threshold (0.04) it's about 1
+        // per frame; at full it's ~6 per frame. The ceil() ensures a single
+        // emission at the threshold rather than silent partials.
+        const count = Math.max(1, Math.round(volume * CONFIG.particlesPerFramePerVolume));
+        for (let i = 0; i < count; i++) {
+            // Radially outward from the source with a small random arc, so
+            // the ripple looks like a stone hitting water rather than a beam.
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 0.8 + Math.random() * CONFIG.particleMaxSpeed * (0.4 + volume);
+            activeParticles.push({
+                role,
+                color,
+                x: src.x + (Math.random() - 0.5) * 10,
+                y: src.y + (Math.random() - 0.5) * 10,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: CONFIG.particleMinSize + Math.random() * CONFIG.particleMaxSize * (0.5 + volume),
+                life:    CONFIG.particleBaseLifetime * (0.7 + volume * 0.7),
+                maxLife: CONFIG.particleBaseLifetime * (0.7 + volume * 0.7),
+                alpha: 0.55 + Math.random() * 0.35,
+            });
+        }
+    }
+
+    function updateParticles() {
+        const bounds = getMapBounds();
+        const cx = mixCenter.x, cy = mixCenter.y;
+        const next = [];
+        for (let i = 0; i < activeParticles.length; i++) {
+            const p = activeParticles[i];
+            // Centre drift: small acceleration toward the mix point so the
+            // ripples bend back inward, giving the "everyone's colour meets
+            // in the middle" feel of the experience.
+            const dx = cx - p.x, dy = cy - p.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 > 1) {
+                const inv = 1 / Math.sqrt(d2);
+                p.vx += dx * inv * CONFIG.particleCenterPull;
+                p.vy += dy * inv * CONFIG.particleCenterPull;
             }
-            if (this.life <= 0) this.reset(false);
+            // Tiny stochastic jitter for an organic feel.
+            p.vx += (Math.random() - 0.5) * 0.08;
+            p.vy += (Math.random() - 0.5) * 0.08;
+            // Damping so they don't accelerate forever.
+            p.vx *= CONFIG.particleDamping;
+            p.vy *= CONFIG.particleDamping;
+            // Integrate.
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 1;
+            // Boundary death — they MUST disappear at the map edge so the
+            // Dead Room rectangle stays meaningful.
+            if (p.x < bounds.left || p.x > bounds.right
+             || p.y < bounds.top  || p.y > bounds.bottom) continue;
+            // Centre-mix death — when they reach the middle, count them as
+            // having "joined the mix" and remove them. Otherwise the centre
+            // would clog with dots over time.
+            if (Math.abs(p.x - cx) < 18 && Math.abs(p.y - cy) < 18) continue;
+            if (p.life <= 0) continue;
+            next.push(p);
         }
-        draw(ctx, volume) {
-            if (volume < 0.01 && this.opacity < 0.05) return;
-            const { r, g, b } = COLORS[this.color];
-            const alpha = this.opacity * this.life * Math.max(0.05, volume);
-            if (alpha < 0.005) return;
-            const sz = this.size * (0.5 + volume * 1.5);
-            ctx.beginPath(); ctx.arc(this.x, this.y, sz, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`; ctx.fill();
+        activeParticles = next;
+    }
+
+    function drawParticles() {
+        for (let i = 0; i < activeParticles.length; i++) {
+            const p = activeParticles[i];
+            const lifeFrac = p.life / p.maxLife;
+            const alpha = p.alpha * Math.max(0, lifeFrac);
+            if (alpha < 0.01) continue;
+            const sz = p.size * (0.7 + lifeFrac * 0.5);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, sz, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${p.color.r},${p.color.g},${p.color.b},${alpha.toFixed(3)})`;
+            ctx.fill();
         }
     }
 
-    const particlePools = { red: [], green: [], blue: [] };
-    function initParticles() {
-        for (const c of ROLES) {
-            particlePools[c] = [];
-            for (let i = 0; i < CONFIG.particlesPerSource; i++) particlePools[c].push(new Particle(c));
+    // ---- Source pulse rings (Task B) ----
+    // Each connected, audible role periodically emits an expanding circle
+    // from its source position. Makes the "this player's phone is being
+    // heard" connection visible at a glance.
+    let activeRings = [];
+    let lastRingAt = { red: 0, green: 0, blue: 0 };
+
+    function maybeSpawnRing(role, src, volume) {
+        if (volume < CONFIG.volumeThresholdVisual) return;
+        // Loud volume = shorter cooldown = more frequent rings.
+        const t = (1 - Math.min(1, volume)); // 0 at full, 1 at threshold
+        const cooldown = CONFIG.ringMinCooldownMs + t * (CONFIG.ringMaxCooldownMs - CONFIG.ringMinCooldownMs);
+        const now = performance.now();
+        if (now - lastRingAt[role] < cooldown) return;
+        lastRingAt[role] = now;
+        activeRings.push({
+            role,
+            color: COLORS[role],
+            x: src.x,
+            y: src.y,
+            born: now,
+            duration: CONFIG.ringTravelSec * 1000,
+            maxRadius: CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.5 + 0.8 * volume),
+            startAlpha: 0.5 + 0.3 * volume,
+        });
+    }
+
+    function updateRings() {
+        const now = performance.now();
+        activeRings = activeRings.filter(r => (now - r.born) < r.duration);
+    }
+
+    function drawRings() {
+        const now = performance.now();
+        for (const r of activeRings) {
+            const t = (now - r.born) / r.duration;   // 0..1
+            if (t < 0 || t > 1) continue;
+            const radius = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * t;
+            const alpha = r.startAlpha * (1 - t);
+            if (alpha < 0.02) continue;
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${alpha.toFixed(3)})`;
+            ctx.lineWidth = 2 + (1 - t) * 1.5;
+            ctx.stroke();
         }
     }
-    initParticles();
+
+    // ---- Source dot (Task B's "stable dot") ----
+    // A small filled circle that always sits at the player's zone anchor,
+    // so even with no particles the visitor can see "you're here". Pulses
+    // gently with volume.
+    function drawSourceDot(cx, cy, volume, color, isConnected) {
+        const { r, g, b } = COLORS[color];
+        const baseR = isConnected ? 9 : 5;
+        const dotR = baseR + volume * 14;
+        const alpha = isConnected ? 0.75 : 0.32;
+        // Outer subtle halo
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dotR * 3);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${(alpha * 0.5).toFixed(3)})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.beginPath(); ctx.arc(cx, cy, dotR * 3, 0, Math.PI * 2);
+        ctx.fillStyle = grad; ctx.fill();
+        // Solid dot
+        ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+        ctx.fill();
+    }
 
     // ---- Cloud ----
     function drawSourceCloud(cx, cy, volume, color) {
@@ -469,6 +641,7 @@
     function updateFromState(s) {
         gameMode = s.mode || 'live';
         experienceStage = s.experienceStage || 'dead-room';
+        currentPhase = s.phase || currentPhase;
         connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];
         playersInfo      = Array.isArray(s.players)          ? s.players          : [];
         // Player zones live on each playersInfo entry. Recompute the
@@ -616,6 +789,7 @@
     function updateFrame(f) {
         gameMode = f.mode || gameMode;
         const kind = f.kind || (currentRound && currentRound.kind) || 'mix';
+        lastFrameAt = performance.now();  // for the debug panel's "last frame: Xms ago"
 
         for (const c of ROLES) {
             const t = (f.volumes && f.volumes[c]) || 0;
@@ -730,24 +904,49 @@
             send({ type: 'volume', level: vol });
         }
 
+        // Per-role anchors + emitters. Each role is independent — a silent
+        // role draws nothing (no faint cloud, no particles, no ring).
         for (const color of ROLES) {
-            const vol = smoothVolumes[color], src = sourcePositions[color];
+            const src = sourcePositions[color];
             if (!src) continue;
-            // Only draw a colour if a phone is actually connected on it,
-            // OR the colour has measurable volume (during the brief decay
-            // after disconnect). Avoids four faint glows on an empty room.
-            const isConnected = connectedPlayers.includes(color);
-            if (!isConnected && vol < 0.005) continue;
-            drawSourceCloud(src.x, src.y, vol, color);
-            for (const p of particlePools[color]) { p.update(vol); p.draw(ctx, vol); }
-            drawSourceLabel(src.x, src.y, color, isConnected);
+            const realVol = smoothVolumes[color] || 0;
+            const simVol  = simulatedVolumes[color] || 0;
+            const vol = Math.max(realVol, simVol);
+            // Connected = a phone has joined OR a keyboard burst is active.
+            // The latter is for the host-only R/G/B test shortcuts.
+            const isConnected = connectedPlayers.includes(color) || simVol > 0;
+
+            // Always draw a small dot at a connected role's anchor, even at
+            // zero volume — so visitors see WHERE their colour will appear.
+            if (isConnected) drawSourceDot(src.x, src.y, vol, color, true);
+
+            // Above the visual threshold: the role is actively audible.
+            // Spawn a source cloud + pulse rings + sound particles.
+            if (vol >= CONFIG.volumeThresholdVisual) {
+                drawSourceCloud(src.x, src.y, vol, color);
+                maybeSpawnRing(color, src, vol);
+                spawnSoundParticles(color, vol, src);
+            }
+
+            if (isConnected) drawSourceLabel(src.x, src.y, color, true);
         }
 
+        // Update + draw the pulse rings and the active-particle list. Rings
+        // are drawn BELOW particles so particles read on top of them.
+        updateRings();
+        drawRings();
+        updateParticles();
+        drawParticles();
+
+        // Centre mixing glow (existing behaviour).
         const mix = {
             r: parseInt(mixR.textContent) || 0, g: parseInt(mixG.textContent) || 0,
             b: parseInt(mixB.textContent) || 0, total: smoothVolumes.red + smoothVolumes.green + smoothVolumes.blue
         };
         drawMixingBoxGlow(mix);
+
+        // Debug panel refresh (cheap — only DOM writes if visible).
+        if (debugVisible) renderDebugPanel();
     }
 
     // ---- Events ----
@@ -833,6 +1032,66 @@
     btnArchiveNewSession.addEventListener('click', () => send({ type: 'set_stage', stage: 'waiting-room' }));
     stageToolbarBtns.forEach(btn => {
         btn.addEventListener('click', () => send({ type: 'set_stage', stage: btn.dataset.stage }));
+    });
+
+    // ---- Debug overlay (Task D) ----
+    // Visible only when the user presses D on the host/projection page.
+    // Plain HTML+CSS panel — no canvas drawing — so it overlays naturally.
+    const dbgElems = {
+        role:      document.getElementById('dbgRole'),
+        phase:     document.getElementById('dbgPhase'),
+        round:     document.getElementById('dbgRound'),
+        connected: document.getElementById('dbgConnected'),
+        volumes:   document.getElementById('dbgVolumes'),
+        sims:      document.getElementById('dbgSims'),
+        particles: document.getElementById('dbgParticles'),
+        rings:     document.getElementById('dbgRings'),
+        lastFrame: document.getElementById('dbgLastFrame'),
+        panel:     document.getElementById('debugPanel'),
+    };
+    function renderDebugPanel() {
+        if (!dbgElems.panel) return;
+        const fmt = v => (Math.max(0, Math.min(1, v)) * 100).toFixed(0).padStart(3, ' ') + '%';
+        const cnt = { red: 0, green: 0, blue: 0 };
+        for (const p of activeParticles) cnt[p.role] = (cnt[p.role] || 0) + 1;
+        dbgElems.role.textContent      = myRole || '—';
+        dbgElems.phase.textContent     = currentPhase + ' / ' + experienceStage;
+        dbgElems.round.textContent     = currentRound ? `${currentRound.kind} · ${currentRound.title}` : '—';
+        dbgElems.connected.textContent = connectedPlayers.length ? connectedPlayers.join(', ') : 'none';
+        dbgElems.volumes.textContent   = `${fmt(smoothVolumes.red)} / ${fmt(smoothVolumes.green)} / ${fmt(smoothVolumes.blue)}`;
+        dbgElems.sims.textContent      = `${fmt(simulatedVolumes.red)} / ${fmt(simulatedVolumes.green)} / ${fmt(simulatedVolumes.blue)}`;
+        dbgElems.particles.textContent = `R=${cnt.red}  G=${cnt.green}  B=${cnt.blue}  total=${activeParticles.length}`;
+        dbgElems.rings.textContent     = String(activeRings.length);
+        dbgElems.lastFrame.textContent = lastFrameAt
+            ? `${Math.round(performance.now() - lastFrameAt)}ms ago`
+            : 'never';
+    }
+    function toggleDebug() {
+        debugVisible = !debugVisible;
+        dbgElems.panel.classList.toggle('hidden', !debugVisible);
+        if (debugVisible) renderDebugPanel();
+    }
+
+    // Keyboard shortcuts. Active on every page (so you can pop the debug
+    // panel up on the player tab too if you ever need to) but R/G/B
+    // simulate ONLY work on host/projection — they're for testing visuals
+    // without three phones connected. They mutate simulatedVolumes locally;
+    // they do NOT send anything to the server.
+    window.addEventListener('keydown', (e) => {
+        // Ignore the shortcuts when an input field is focused (so typing
+        // your name on the Setup screen doesn't simulate bursts).
+        const target = e.target;
+        const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        if (inField) return;
+
+        const k = e.key.toLowerCase();
+        if (k === 'd') { toggleDebug(); return; }
+        // Host-only sim bursts. We check myRole rather than tab role so a
+        // visitor's phone can't accidentally trigger them.
+        if (myRole !== 'host') return;
+        if (k === 'r') simulateBurst('red');
+        else if (k === 'g') simulateBurst('green');
+        else if (k === 'b') simulateBurst('blue');
     });
 
     // ---- Init ----
