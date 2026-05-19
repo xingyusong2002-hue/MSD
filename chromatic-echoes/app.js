@@ -45,10 +45,9 @@
     const btnStartRound = document.getElementById('btnStartRound');
     const modeBtns = document.querySelectorAll('.mode-btn');
     const lobbySlots = {
-        red:    document.getElementById('lobbyRed'),
-        green:  document.getElementById('lobbyGreen'),
-        blue:   document.getElementById('lobbyBlue'),
-        purple: document.getElementById('lobbyPurple'),
+        red:   document.getElementById('lobbyRed'),
+        green: document.getElementById('lobbyGreen'),
+        blue:  document.getElementById('lobbyBlue'),
     };
     const playerColorLabel = document.getElementById('playerColorLabel');
     const waitPulse = document.getElementById('waitPulse');
@@ -69,17 +68,14 @@
     const barRed = document.getElementById('barRed');
     const barGreen = document.getElementById('barGreen');
     const barBlue = document.getElementById('barBlue');
-    const barPurple = document.getElementById('barPurple');
     const barRedVal = document.getElementById('barRedVal');
     const barGreenVal = document.getElementById('barGreenVal');
     const barBlueVal = document.getElementById('barBlueVal');
-    const barPurpleVal = document.getElementById('barPurpleVal');
     // Live-share-of-mix readouts. Per-role normalised contribution.
     const shareEls = {
-        red:    document.getElementById('shareRed'),
-        green:  document.getElementById('shareGreen'),
-        blue:   document.getElementById('shareBlue'),
-        purple: document.getElementById('sharePurple'),
+        red:   document.getElementById('shareRed'),
+        green: document.getElementById('shareGreen'),
+        blue:  document.getElementById('shareBlue'),
     };
     const roundNum = document.getElementById('roundNum');
     const roundTotal = document.getElementById('roundTotal');
@@ -91,16 +87,14 @@
     const btnNextRound = document.getElementById('btnNextRound');
     const successHint = document.getElementById('successHint');
 
-    // Player identities. Purple was added in the MVP Phase 2 pass — it has
-    // a particle pool + source cloud like the other three, but its mix
-    // contribution is projected to R+B server-side so target maths stays RGB.
+    // Three player identities. Purple was added briefly as a 4th blender
+    // colour but removed per user request — three is the agreed MVP set.
     const COLORS = {
-        red:    { r: 255, g: 51,  b: 85  },
-        green:  { r: 51,  g: 255, b: 136 },
-        blue:   { r: 51,  g: 136, b: 255 },
-        purple: { r: 178, g: 102, b: 255 },
+        red:   { r: 255, g: 51,  b: 85  },
+        green: { r: 51,  g: 255, b: 136 },
+        blue:  { r: 51,  g: 136, b: 255 },
     };
-    const ROLES = ['red', 'green', 'blue', 'purple'];
+    const ROLES = ['red', 'green', 'blue'];
     const ZONES = ['A', 'B', 'C', 'Center'];
     const SOUND_ROLES = ['voice', 'hum', 'clap', 'whisper', 'micro-sound'];
     const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 110, cloudMaxRadius: 220, cloudLayers: 5, cloudMinOpacity: 0.32, cloudMaxOpacity: 0.6 };
@@ -122,7 +116,7 @@
     // Human-readable labels used on the HUD instruction strip.
     const KIND_LABELS = { solo: 'Solo Echo', move: 'Move Echo', mix: 'Mix Echo', silent: 'Silent Echo' };
     let animationId = null, time = 0;
-    let smoothVolumes = { red: 0, green: 0, blue: 0, purple: 0 };
+    let smoothVolumes = { red: 0, green: 0, blue: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
 
     // Pure function: visitor-declared zone → on-screen anchor coordinates.
@@ -207,7 +201,7 @@
         }
     }
 
-    const particlePools = { red: [], green: [], blue: [], purple: [] };
+    const particlePools = { red: [], green: [], blue: [] };
     function initParticles() {
         for (const c of ROLES) {
             particlePools[c] = [];
@@ -311,10 +305,26 @@
     // ---- Live mic-level meter on the player wait screen ----
     // Runs independently of the game-state render loop so the player can
     // verify "yes, the room hears me" *before* the host starts the round.
+    //
+    // Important side-effect: this is also the AudioContext keep-alive. When
+    // multiple browser tabs/windows share one physical mic, Chrome happily
+    // suspends the AudioContext of any tab it considers backgrounded — and
+    // a suspended context returns ALL-ZERO buffers from getFloatTimeDomainData
+    // even though the mic permission says "Using now". That's the root
+    // cause of the "host shows 0% even when players are speaking" bug. So
+    // every interval tick, if state isn't 'running', we try resume(). This
+    // is cheap (no-op when already running) and silently no-ops on failure.
     let micMeterInterval = null;
     function startMicMeter() {
         if (micMeterInterval) return;
         micMeterInterval = setInterval(() => {
+            // Keep-alive: nudge the context back to running if Chrome
+            // suspended it (typically because the tab/window was in the
+            // background). resume() is async but we don't await — fire
+            // and forget; the next tick will see the updated state.
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
             const bar = document.getElementById('micMeterFill');
             const status = document.getElementById('micMeterStatus');
             if (!bar) return;
@@ -327,6 +337,23 @@
             const pct = Math.min(100, Math.round(raw * 600));
             bar.style.width = pct + '%';
             if (status) status.textContent = pct < 2 ? 'silent' : pct < 12 ? 'listening…' : pct < 40 ? 'good signal' : 'loud';
+
+            // Mirror status onto the in-HUD transmitting pill (visible
+            // during play, so the player can SEE their volume is being
+            // sent to the server even while their wait screen is hidden).
+            const tx = document.getElementById('hudTransmit');
+            const txFill = document.getElementById('hudTransmitFill');
+            const txStat = document.getElementById('hudTransmitStat');
+            if (tx) {
+                tx.classList.toggle('hidden', !(myRole && myRole !== 'host'));
+                if (txFill) txFill.style.width = pct + '%';
+                if (txStat) txStat.textContent =
+                    audioCtx && audioCtx.state !== 'running' ? `mic ${audioCtx.state}`
+                  : pct < 2 ? 'silent'
+                  : pct < 12 ? 'listening…'
+                  : pct < 40 ? 'transmitting'
+                  : 'transmitting · loud';
+            }
         }, 90);
     }
     function stopMicMeter() {
@@ -465,9 +492,8 @@
                 : 'Mode: Live Mix — match the target ratio with your volume';
         }
 
-        // Lobby slots — iterate ROLES so a Purple slot (added in the MVP
-        // Phase 2 HTML pass) lights up the same way. Guard against missing
-        // DOM in case the HTML hasn't been updated yet.
+        // Lobby slots — iterate ROLES. Guard against missing DOM in case
+        // the HTML hasn't been updated yet.
         ROLES.forEach(c => {
             const slot = lobbySlots[c];
             if (!slot) return;
@@ -600,24 +626,21 @@
         const rv = Math.round(smoothVolumes.red * 100);
         const gv = Math.round(smoothVolumes.green * 100);
         const bv = Math.round(smoothVolumes.blue * 100);
-        const pv = Math.round(smoothVolumes.purple * 100);
-        barRed.style.width    = rv + '%';
-        barGreen.style.width  = gv + '%';
-        barBlue.style.width   = bv + '%';
-        barPurple.style.width = pv + '%';
-        barRedVal.textContent    = rv + '%';
-        barGreenVal.textContent  = gv + '%';
-        barBlueVal.textContent   = bv + '%';
-        barPurpleVal.textContent = pv + '%';
+        barRed.style.width   = rv + '%';
+        barGreen.style.width = gv + '%';
+        barBlue.style.width  = bv + '%';
+        barRedVal.textContent   = rv + '%';
+        barGreenVal.textContent = gv + '%';
+        barBlueVal.textContent  = bv + '%';
 
         // Live contribution % — each role's share of the total raw volume
-        // across all four colours. "— of mix" while everyone is silent.
-        const totalRaw = rv + gv + bv + pv;
+        // across all three colours. "— of mix" while everyone is silent.
+        const totalRaw = rv + gv + bv;
         for (const role of ROLES) {
             const el = shareEls[role];
             if (!el) continue;
             if (totalRaw < 1) { el.textContent = '— of mix'; continue; }
-            const myRaw = role === 'red' ? rv : role === 'green' ? gv : role === 'blue' ? bv : pv;
+            const myRaw = role === 'red' ? rv : role === 'green' ? gv : bv;
             const pct = Math.round((myRaw / totalRaw) * 100);
             el.textContent = pct + '% of mix';
         }
@@ -700,7 +723,12 @@
         time += 0.016;
         ctx.fillStyle = `rgba(5,5,8,${CONFIG.trailAlpha})`; ctx.fillRect(0, 0, w, h);
 
-        if (myRole && myRole !== 'host') { const vol = getVolume(); send({ type: 'volume', level: vol }); }
+        if (myRole && myRole !== 'host') {
+            // Defensive resume in case the keep-alive interval was lost.
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+            const vol = getVolume();
+            send({ type: 'volume', level: vol });
+        }
 
         for (const color of ROLES) {
             const vol = smoothVolumes[color], src = sourcePositions[color];

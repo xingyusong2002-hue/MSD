@@ -162,11 +162,6 @@
                     <span class="role-name">Blue</span>
                     <span class="role-status">Available</span>
                 </button>
-                <button id="rolePurple" class="role-card role-purple" data-role="purple">
-                    <div class="role-orb"></div>
-                    <span class="role-name">Purple</span>
-                    <span class="role-status">Available</span>
-                </button>
             </div>
             <button id="btnBackToLanding" class="btn btn-ghost">← Back</button>
         </div>
@@ -210,11 +205,6 @@
                 <div id="lobbyBlue" class="lobby-slot lobby-slot-blue">
                     <div class="lobby-orb"></div>
                     <span class="lobby-label">Blue</span>
-                    <span class="lobby-state">Waiting...</span>
-                </div>
-                <div id="lobbyPurple" class="lobby-slot lobby-slot-purple">
-                    <div class="lobby-orb"></div>
-                    <span class="lobby-label">Purple</span>
                     <span class="lobby-state">Waiting...</span>
                 </div>
             </div>
@@ -296,6 +286,16 @@
             <p class="hud-empty-text">Open a second window, click <b>Join Game</b>, and pick a colour to bring the room to life.</p>
         </div>
 
+        <!-- Player-only "transmitting" pill — shows on the game HUD that
+             this tab's mic is actually being read and sent to the server.
+             When you see "transmitting" here but 0% on the host, the bug
+             is on the host side, not the mic. -->
+        <div id="hudTransmit" class="hud-transmit hidden">
+            <span class="hud-transmit-label">your mic</span>
+            <div class="hud-transmit-track"><div id="hudTransmitFill" class="hud-transmit-fill"></div></div>
+            <span id="hudTransmitStat" class="hud-transmit-stat">—</span>
+        </div>
+
         <!-- Per-round instruction strip -->
         <div id="roundInstruction" class="round-instruction">
             <span id="roundKindTag" class="round-kind-tag">Mix Echo</span>
@@ -358,14 +358,6 @@
                 </div>
                 <span id="barBlueVal" class="pbar-val">0%</span>
                 <span id="shareBlue" class="pbar-share">— of mix</span>
-            </div>
-            <div class="pbar pbar-purple">
-                <span class="pbar-label">Purple</span>
-                <div class="pbar-track">
-                    <div id="barPurple" class="pbar-fill pbar-fill-purple"></div>
-                </div>
-                <span id="barPurpleVal" class="pbar-val">0%</span>
-                <span id="sharePurple" class="pbar-share">— of mix</span>
             </div>
         </div>
 

@@ -851,10 +851,6 @@ body {
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), var(--color-blue));
 }
 
-.pbar-fill-purple {
-    background: linear-gradient(90deg, oklch(100% 0 0 / 0.2), var(--c-purple));
-}
-
 .pbar-val {
     font-size: 0.72rem;
     color: var(--color-text-dim);
@@ -1573,35 +1569,8 @@ body {
 }
 
 /* ============================================
-   MVP Phase 2 — Visitor: Purple, Setup, Zone Picker
+   MVP Phase 2 — Visitor: Setup, Zone Picker
    ============================================ */
-
-/* Purple identity token. Defined here as an OKLCH so future lightness
-   adjustments don't shift hue (see DESIGN.md). */
-:root {
-    --c-purple:     oklch(65% 0.22 305);
-    --c-purple-dim: oklch(65% 0.22 305 / 0.3);
-}
-
-/* Purple role card on the Choose-Your-Color screen. Mirrors the existing
-   .role-red / .role-green / .role-blue treatment. */
-.role-purple .role-orb {
-    background: var(--c-purple);
-    box-shadow: 0 0 30px var(--c-purple-dim);
-}
-.role-purple:hover:not(:disabled) .role-orb {
-    box-shadow: 0 0 50px var(--c-purple);
-}
-
-/* Purple lobby slot — same pattern as the others. */
-.lobby-slot-purple .lobby-orb {
-    background: var(--c-purple);
-    box-shadow: 0 0 14px var(--c-purple-dim);
-}
-.lobby-slot.connected.lobby-slot-purple {
-    border-color: var(--c-purple);
-    box-shadow: 0 0 18px var(--c-purple-dim);
-}
 
 /* ---- Player Setup screen (name + sound role) ---- */
 .setup-block {
@@ -1792,6 +1761,54 @@ body {
     position: static;
 }
 
+/* ---- In-HUD "transmitting" pill (player-only) ----
+   Mirrors the wait-screen mic-meter into the playing screen so a player
+   can see their mic is reaching the server even while the wait screen is
+   hidden. Sits bottom-left so it doesn't compete with the centre HUD. */
+.hud-transmit {
+    position: absolute;
+    bottom: 18px;
+    left: 18px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    color: var(--c-text-dim);
+    pointer-events: none;
+}
+.hud-transmit-label {
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+}
+.hud-transmit-track {
+    width: 90px;
+    height: 5px;
+    border-radius: 999px;
+    background: oklch(100% 0 0 / 0.06);
+    overflow: hidden;
+}
+.hud-transmit-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--c-blue), var(--c-green), var(--c-red));
+    transition: width 80ms linear;
+}
+.hud-transmit-stat {
+    min-width: 96px;
+    text-align: right;
+    color: var(--c-text);
+    font-variant-numeric: tabular-nums;
+}
+
 /* ---- Per-player share readout next to each volume bar ---- */
 .pbar-share {
     font-family: var(--font-body);
@@ -1803,7 +1820,3 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
-/* Purple volume bar layout — mirrors the .pbar-red etc. existing rules. */
-.pbar-purple .pbar-label {
-    color: var(--c-purple);
-}

@@ -53,10 +53,10 @@ const ROUNDS = [
 // All existing gameplay lives inside `experienceStage === 'dead-room'`.
 const STAGES = ['waiting-room', 'threshold', 'dead-room', 'archive'];
 
-// All player identities. Purple was added in the MVP Phase 2 pass. Targets
-// remain RGB — Purple's volume contributes 0.5 to R and 0.5 to B at the
-// centre mix (see computeLiveMix / computeAccumulatedMix below).
-const ROLES = ['red', 'green', 'blue', 'purple'];
+// All player identities. We tried adding Purple as a 4th "blender" colour
+// briefly, but the user decided three colours is enough for the MVP — keeps
+// the round design + Mix Echo targets simpler.
+const ROLES = ['red', 'green', 'blue'];
 
 // Visitor-declared position in the Dead Room. No GPS — visitor taps a zone
 // button on their phone. Default 'Center'.
@@ -66,8 +66,8 @@ const ZONES = ['A', 'B', 'C', 'Center'];
 // and embedded in archive records; does NOT alter mix maths in MVP.
 const SOUND_ROLES = ['voice', 'hum', 'clap', 'whisper', 'micro-sound'];
 
-// Build a {red:def, green:def, blue:def, purple:def} object for the
-// per-role maps below — avoids repeating the four keys everywhere.
+// Build a {red:def, green:def, blue:def} object for the per-role maps
+// below — avoids repeating the three keys everywhere.
 function perRole(defaultValue) {
     const out = {};
     for (const r of ROLES) out[r] = (typeof defaultValue === 'function') ? defaultValue() : defaultValue;
@@ -134,20 +134,9 @@ function getCurrentTarget() {
     return getCurrentRound().target || null;
 }
 
-// Purple is a "blender" identity — its loudness contributes 0.5 to R and
-// 0.5 to B at the centre, so Mix Echo targets stay RGB while Purple players
-// still meaningfully boost the red+blue ends of the mix.
-function projectMixContributions(volumes) {
-    return {
-        r: volumes.red   + 0.5 * (volumes.purple || 0),
-        g: volumes.green,
-        b: volumes.blue  + 0.5 * (volumes.purple || 0),
-    };
-}
-
 // Compute current mix from LIVE volumes (Mode 1)
 function computeLiveMix() {
-    const { r: rv, g: gv, b: bv } = projectMixContributions(game.volumes);
+    const rv = game.volumes.red, gv = game.volumes.green, bv = game.volumes.blue;
     const total = rv + gv + bv;
     if (total < 0.001) return { r: 0, g: 0, b: 0, total: 0 };
     return {
@@ -160,7 +149,7 @@ function computeLiveMix() {
 
 // Compute current mix from ACCUMULATED values (Mode 2)
 function computeAccumulatedMix() {
-    const { r: rv, g: gv, b: bv } = projectMixContributions(game.accumulated);
+    const rv = game.accumulated.red, gv = game.accumulated.green, bv = game.accumulated.blue;
     const total = rv + gv + bv;
     if (total < 0.001) return { r: 0, g: 0, b: 0, total: 0 };
     return {
