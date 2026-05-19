@@ -1567,3 +1567,155 @@ body {
     pointer-events: none;
     z-index: 0;
 }
+
+/* ============================================
+   MVP Phase 2 — Visitor: Purple, Setup, Zone Picker
+   ============================================ */
+
+/* Purple identity token. Defined here as an OKLCH so future lightness
+   adjustments don't shift hue (see DESIGN.md). */
+:root {
+    --c-purple:     oklch(65% 0.22 305);
+    --c-purple-dim: oklch(65% 0.22 305 / 0.3);
+}
+
+/* Purple role card on the Choose-Your-Color screen. Mirrors the existing
+   .role-red / .role-green / .role-blue treatment. */
+.role-purple .role-orb {
+    background: var(--c-purple);
+    box-shadow: 0 0 30px var(--c-purple-dim);
+}
+.role-purple:hover:not(:disabled) .role-orb {
+    box-shadow: 0 0 50px var(--c-purple);
+}
+
+/* Purple lobby slot — same pattern as the others. */
+.lobby-slot-purple .lobby-orb {
+    background: var(--c-purple);
+    box-shadow: 0 0 14px var(--c-purple-dim);
+}
+.lobby-slot.connected.lobby-slot-purple {
+    border-color: var(--c-purple);
+    box-shadow: 0 0 18px var(--c-purple-dim);
+}
+
+/* ---- Player Setup screen (name + sound role) ---- */
+.setup-block {
+    margin: 0 auto 1.6em;
+    max-width: 460px;
+    text-align: left;
+}
+.setup-label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--c-text-dim);
+    margin-bottom: 0.65em;
+}
+.setup-input {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--c-text);
+    font-family: var(--font-body);
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+.setup-input:focus {
+    border-color: oklch(100% 0 0 / 0.25);
+}
+
+.sound-role-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 10px;
+}
+.sound-role-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--c-text);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+    font-family: var(--font-body);
+}
+.sound-role-card:hover {
+    border-color: oklch(100% 0 0 / 0.18);
+    transform: translateY(-1px);
+}
+.sound-role-card.active {
+    background: oklch(100% 0 0 / 0.08);
+    border-color: oklch(100% 0 0 / 0.3);
+}
+.sound-role-card .sr-name {
+    font-size: 0.95rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+.sound-role-card .sr-hint {
+    font-size: 0.72rem;
+    color: var(--c-text-dim);
+    letter-spacing: 0.04em;
+}
+
+/* ---- Zone picker (manual room-position selector) ----
+   Four buttons in a 3-column compact grid that visually approximates the
+   room layout: A and B in the top row, C beneath, Center spanning the
+   middle row. Active state is a filled pill in the player's identity
+   colour when assigned. */
+.zone-picker {
+    margin: 2em auto 0;
+    max-width: 360px;
+    text-align: center;
+}
+.zone-picker-label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--c-text-dim);
+    margin-bottom: 0.9em;
+}
+.zone-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 8px;
+    align-items: stretch;
+}
+.zone-btn {
+    padding: 14px 0;
+    border-radius: 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--c-text);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.zone-btn:hover {
+    border-color: oklch(100% 0 0 / 0.2);
+}
+.zone-btn.active {
+    background: oklch(100% 0 0 / 0.1);
+    border-color: oklch(100% 0 0 / 0.32);
+    color: var(--c-text);
+    font-weight: 500;
+}
+.zone-btn--center {
+    grid-column: span 2;       /* full-width middle row */
+}

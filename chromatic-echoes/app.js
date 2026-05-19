@@ -9,6 +9,7 @@
     const canvas = document.getElementById('rippleCanvas');
     const ctx = canvas.getContext('2d');
     const screenLanding = document.getElementById('screenLanding');
+    const screenPlayerSetup = document.getElementById('screenPlayerSetup');
     const screenRoles = document.getElementById('screenRoles');
     const screenLobby = document.getElementById('screenLobby');
     const screenPlayerWait = document.getElementById('screenPlayerWait');
@@ -16,6 +17,11 @@
     const screenWaitingRoom = document.getElementById('screenWaitingRoom');
     const screenThreshold = document.getElementById('screenThreshold');
     const screenArchive = document.getElementById('screenArchive');
+    const playerNameInput = document.getElementById('playerNameInput');
+    const soundRoleCards = document.querySelectorAll('.sound-role-card');
+    const btnSetupContinue = document.getElementById('btnSetupContinue');
+    const btnSetupBack = document.getElementById('btnSetupBack');
+    const zoneButtons = document.querySelectorAll('.zone-btn');
     const gameHud = document.getElementById('gameHud');
     const stageToolbar = document.getElementById('stageToolbar');
     const stageToolbarBtns = document.querySelectorAll('.stage-toolbar-btn');
@@ -38,7 +44,12 @@
     const lobbyUrl = document.getElementById('lobbyUrl');
     const btnStartRound = document.getElementById('btnStartRound');
     const modeBtns = document.querySelectorAll('.mode-btn');
-    const lobbySlots = { red: document.getElementById('lobbyRed'), green: document.getElementById('lobbyGreen'), blue: document.getElementById('lobbyBlue') };
+    const lobbySlots = {
+        red:    document.getElementById('lobbyRed'),
+        green:  document.getElementById('lobbyGreen'),
+        blue:   document.getElementById('lobbyBlue'),
+        purple: document.getElementById('lobbyPurple'),
+    };
     const playerColorLabel = document.getElementById('playerColorLabel');
     const waitPulse = document.getElementById('waitPulse');
     const playerModeHint = document.getElementById('playerModeHint');
@@ -71,20 +82,53 @@
     const btnNextRound = document.getElementById('btnNextRound');
     const successHint = document.getElementById('successHint');
 
-    const COLORS = { red: { r: 255, g: 51, b: 85 }, green: { r: 51, g: 255, b: 136 }, blue: { r: 51, g: 136, b: 255 } };
+    // Player identities. Purple was added in the MVP Phase 2 pass — it has
+    // a particle pool + source cloud like the other three, but its mix
+    // contribution is projected to R+B server-side so target maths stays RGB.
+    const COLORS = {
+        red:    { r: 255, g: 51,  b: 85  },
+        green:  { r: 51,  g: 255, b: 136 },
+        blue:   { r: 51,  g: 136, b: 255 },
+        purple: { r: 178, g: 102, b: 255 },
+    };
+    const ROLES = ['red', 'green', 'blue', 'purple'];
+    const ZONES = ['A', 'B', 'C', 'Center'];
+    const SOUND_ROLES = ['voice', 'hum', 'clap', 'whisper', 'micro-sound'];
     const CONFIG = { volumeThreshold: 0.008, volumeMax: 0.30, trailAlpha: 0.06, particlesPerSource: 80, particleMaxSpeed: 4, particleMinSize: 1, particleMaxSize: 5, cloudBaseRadius: 110, cloudMaxRadius: 220, cloudLayers: 5, cloudMinOpacity: 0.32, cloudMaxOpacity: 0.6 };
 
     // ---- State ----
     let ws = null, myRole = null, gameMode = 'live', experienceStage = 'waiting-room';
     let currentRound = null;
-    let connectedPlayers = [];  // ['red','green','blue'] subset — for source labels
+    let connectedPlayers = [];  // role subset — for source labels
+    // Each entry: {role, name, soundRole, zone, connected, volume}.
+    // Pulled from the state broadcast; drives label text, zone-based source
+    // positions, and the contribution panel.
+    let playersInfo = [];
+    // Visitor's own choices, filled in across the Setup → Roles → Wait flow.
+    let myName = '';
+    let mySoundRole = '';
+    let myZone = 'Center';
     let audioCtx, analyser, timeDomainData;
 
     // Human-readable labels used on the HUD instruction strip.
     const KIND_LABELS = { solo: 'Solo Echo', move: 'Move Echo', mix: 'Mix Echo', silent: 'Silent Echo' };
     let animationId = null, time = 0;
-    let smoothVolumes = { red: 0, green: 0, blue: 0 };
+    let smoothVolumes = { red: 0, green: 0, blue: 0, purple: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
+
+    // Pure function: visitor-declared zone → on-screen anchor coordinates.
+    // No GPS / IMU / camera. Each colour's source position is its player's
+    // current zone (broadcast from the server). See docs/UI_ARCHITECTURE.md.
+    function getZonePosition(zone, w, h) {
+        const m = Math.min(w, h) * 0.20;
+        switch (zone) {
+            case 'A':      return { x: m,         y: m         };  // top-left
+            case 'B':      return { x: w - m,     y: m         };  // top-right
+            case 'C':      return { x: w / 2,     y: h - m     };  // bottom-centre
+            case 'Center':
+            default:       return { x: w / 2,     y: h / 2     };
+        }
+    }
 
     // ---- Canvas ----
     function resizeCanvas() {
@@ -96,11 +140,17 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         computePositions();
     }
+    // Recompute every role's source position from the latest broadcast zones.
+    // Called on resize and on each state broadcast (because the visitor's
+    // zone change for any role moves that role's anchor).
     function computePositions() {
         const w = window.innerWidth, h = window.innerHeight;
         mixCenter = { x: w / 2, y: h / 2 };
-        const m = Math.min(w, h) * 0.18;
-        sourcePositions = { red: { x: m, y: m }, green: { x: w - m, y: m }, blue: { x: w / 2, y: h - m } };
+        const zoneByRole = {};
+        for (const p of playersInfo) zoneByRole[p.role] = p.zone || 'Center';
+        for (const role of ROLES) {
+            sourcePositions[role] = getZonePosition(zoneByRole[role] || 'Center', w, h);
+        }
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
@@ -148,9 +198,9 @@
         }
     }
 
-    const particlePools = { red: [], green: [], blue: [] };
+    const particlePools = { red: [], green: [], blue: [], purple: [] };
     function initParticles() {
-        for (const c of ['red', 'green', 'blue']) {
+        for (const c of ROLES) {
             particlePools[c] = [];
             for (let i = 0; i < CONFIG.particlesPerSource; i++) particlePools[c].push(new Particle(c));
         }
@@ -384,6 +434,10 @@
         gameMode = s.mode || 'live';
         experienceStage = s.experienceStage || 'dead-room';
         connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];
+        playersInfo      = Array.isArray(s.players)          ? s.players          : [];
+        // Player zones live on each playersInfo entry. Recompute the
+        // anchors so the next frame renders dots at the right zones.
+        computePositions();
 
         // Update mode buttons in lobby
         modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === gameMode));
@@ -402,11 +456,16 @@
                 : 'Mode: Live Mix — match the target ratio with your volume';
         }
 
-        // Lobby slots
-        ['red', 'green', 'blue'].forEach(c => {
-            const slot = lobbySlots[c], connected = s.connectedPlayers.includes(c);
+        // Lobby slots — iterate ROLES so a Purple slot (added in the MVP
+        // Phase 2 HTML pass) lights up the same way. Guard against missing
+        // DOM in case the HTML hasn't been updated yet.
+        ROLES.forEach(c => {
+            const slot = lobbySlots[c];
+            if (!slot) return;
+            const connected = s.connectedPlayers.includes(c);
             slot.classList.toggle('connected', connected);
-            slot.querySelector('.lobby-state').textContent = connected ? 'Connected!' : 'Waiting...';
+            const stateEl = slot.querySelector('.lobby-state');
+            if (stateEl) stateEl.textContent = connected ? 'Connected!' : 'Waiting...';
         });
 
         // Role cards
@@ -523,8 +582,8 @@
         gameMode = f.mode || gameMode;
         const kind = f.kind || (currentRound && currentRound.kind) || 'mix';
 
-        for (const c of ['red', 'green', 'blue']) {
-            const t = f.volumes[c] || 0;
+        for (const c of ROLES) {
+            const t = (f.volumes && f.volumes[c]) || 0;
             smoothVolumes[c] += (t - smoothVolumes[c]) * 0.2;
         }
 
@@ -584,12 +643,12 @@
     }
 
     // ---- Screen Management ----
-    const screens = [screenLanding, screenRoles, screenLobby, screenPlayerWait, screenSuccess,
+    const screens = [screenLanding, screenPlayerSetup, screenRoles, screenLobby, screenPlayerWait, screenSuccess,
                      screenWaitingRoom, screenThreshold, screenArchive];
     function showScreen(name) {
         screens.forEach(s => s.classList.remove('active'));
         const map = {
-            landing: screenLanding, roles: screenRoles, lobby: screenLobby,
+            landing: screenLanding, setup: screenPlayerSetup, roles: screenRoles, lobby: screenLobby,
             playerWait: screenPlayerWait, success: screenSuccess,
             waitingRoom: screenWaitingRoom, threshold: screenThreshold, archive: screenArchive,
         };
@@ -612,12 +671,17 @@
 
         if (myRole && myRole !== 'host') { const vol = getVolume(); send({ type: 'volume', level: vol }); }
 
-        for (const color of ['red', 'green', 'blue']) {
+        for (const color of ROLES) {
             const vol = smoothVolumes[color], src = sourcePositions[color];
             if (!src) continue;
+            // Only draw a colour if a phone is actually connected on it,
+            // OR the colour has measurable volume (during the brief decay
+            // after disconnect). Avoids four faint glows on an empty room.
+            const isConnected = connectedPlayers.includes(color);
+            if (!isConnected && vol < 0.005) continue;
             drawSourceCloud(src.x, src.y, vol, color);
             for (const p of particlePools[color]) { p.update(vol); p.draw(ctx, vol); }
-            drawSourceLabel(src.x, src.y, color, connectedPlayers.includes(color));
+            drawSourceLabel(src.x, src.y, color, isConnected);
         }
 
         const mix = {
@@ -629,14 +693,51 @@
 
     // ---- Events ----
     btnHost.addEventListener('click', () => { send({ type: 'join', role: 'host' }); lobbyUrl.textContent = location.href; });
-    btnJoin.addEventListener('click', () => showScreen('roles'));
+    btnJoin.addEventListener('click', () => showScreen('setup'));   // setup BEFORE colour pick
     btnBackToLanding.addEventListener('click', () => showScreen('landing'));
+    btnSetupBack.addEventListener('click', () => showScreen('landing'));
+
+    // ---- Player Setup wiring ----
+    // Continue is enabled only once a sound role is picked. Name is optional.
+    function updateSetupContinueState() {
+        btnSetupContinue.disabled = !mySoundRole;
+    }
+    soundRoleCards.forEach(card => {
+        card.addEventListener('click', () => {
+            mySoundRole = card.dataset.soundRole;
+            soundRoleCards.forEach(c => c.classList.toggle('active', c === card));
+            updateSetupContinueState();
+        });
+    });
+    playerNameInput.addEventListener('input', () => { myName = playerNameInput.value.trim().slice(0, 40); });
+    btnSetupContinue.addEventListener('click', () => showScreen('roles'));
+
+    // ---- Zone picker wiring ----
+    // Updates local UI immediately and tells the server. Server broadcasts
+    // zones to everyone so the projection moves the player's dot.
+    function applyZone(zone) {
+        if (!ZONES.includes(zone)) return;
+        myZone = zone;
+        zoneButtons.forEach(b => b.classList.toggle('active', b.dataset.zone === zone));
+        if (myRole && myRole !== 'host') send({ type: 'set_zone', zone });
+    }
+    zoneButtons.forEach(b => b.addEventListener('click', () => applyZone(b.dataset.zone)));
+    applyZone('Center');   // default highlight
 
     roleCards.forEach(card => {
         card.addEventListener('click', async () => {
             if (card.disabled) return;
             const ok = await initAudio(); if (!ok) return;
-            send({ type: 'join', role: card.dataset.role });
+            // Send everything we know about the visitor in the join — name +
+            // sound role (gathered on Setup) + zone (defaulting to Center
+            // until they tap a zone button on the wait screen).
+            send({
+                type: 'join',
+                role: card.dataset.role,
+                name: myName,
+                soundRole: mySoundRole,
+                zone: myZone,
+            });
         });
     });
 

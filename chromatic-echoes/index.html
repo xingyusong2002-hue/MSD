@@ -95,6 +95,52 @@
         </div>
     </div>
 
+    <!-- ===== SCREEN: Player Setup (name + sound role, before colour pick) ===== -->
+    <div id="screenPlayerSetup" class="screen">
+        <button id="btnSetupBack" class="btn btn-ghost screen-back">← Back</button>
+        <div class="screen-content">
+            <h2 class="screen-title">Before you step in</h2>
+            <p class="screen-subtitle">Two quick questions</p>
+
+            <div class="setup-block">
+                <label class="setup-label" for="playerNameInput">Your name (optional)</label>
+                <input id="playerNameInput" class="setup-input" type="text" autocomplete="off"
+                       maxlength="40" placeholder="e.g. Mira" />
+            </div>
+
+            <div class="setup-block">
+                <span class="setup-label">How will you make sound?</span>
+                <div class="sound-role-grid">
+                    <button class="sound-role-card" data-sound-role="voice">
+                        <span class="sr-name">Voice</span>
+                        <span class="sr-hint">talk, sing</span>
+                    </button>
+                    <button class="sound-role-card" data-sound-role="hum">
+                        <span class="sr-name">Hum</span>
+                        <span class="sr-hint">long, low</span>
+                    </button>
+                    <button class="sound-role-card" data-sound-role="clap">
+                        <span class="sr-name">Clap</span>
+                        <span class="sr-hint">short, sharp</span>
+                    </button>
+                    <button class="sound-role-card" data-sound-role="whisper">
+                        <span class="sr-name">Whisper</span>
+                        <span class="sr-hint">soft, breathy</span>
+                    </button>
+                    <button class="sound-role-card" data-sound-role="micro-sound">
+                        <span class="sr-name">Micro-sound</span>
+                        <span class="sr-hint">tap, click, tiny</span>
+                    </button>
+                </div>
+            </div>
+
+            <button id="btnSetupContinue" class="btn btn-primary" disabled>
+                <span class="btn-text">Continue →</span>
+            </button>
+            <p class="hint">You can change either of these later.</p>
+        </div>
+    </div>
+
     <!-- ===== SCREEN: Role Selection ===== -->
     <div id="screenRoles" class="screen">
         <div class="screen-content">
@@ -114,6 +160,11 @@
                 <button id="roleBlue" class="role-card role-blue" data-role="blue">
                     <div class="role-orb"></div>
                     <span class="role-name">Blue</span>
+                    <span class="role-status">Available</span>
+                </button>
+                <button id="rolePurple" class="role-card role-purple" data-role="purple">
+                    <div class="role-orb"></div>
+                    <span class="role-name">Purple</span>
                     <span class="role-status">Available</span>
                 </button>
             </div>
@@ -161,6 +212,11 @@
                     <span class="lobby-label">Blue</span>
                     <span class="lobby-state">Waiting...</span>
                 </div>
+                <div id="lobbyPurple" class="lobby-slot lobby-slot-purple">
+                    <div class="lobby-orb"></div>
+                    <span class="lobby-label">Purple</span>
+                    <span class="lobby-state">Waiting...</span>
+                </div>
             </div>
             <button id="btnStartRound" class="btn btn-primary btn-glow" disabled>
                 <span class="btn-text">Start Round</span>
@@ -185,6 +241,20 @@
                 <span class="mic-meter-label">microphone</span>
                 <div class="mic-meter-track"><div id="micMeterFill" class="mic-meter-fill"></div></div>
                 <span id="micMeterStatus" class="mic-meter-status">no mic</span>
+            </div>
+
+            <!-- Manual zone picker — no GPS. The visitor taps the quadrant
+                 they're currently standing in so the projection can anchor
+                 their colour at the right spot. Stays usable mid-round
+                 (Move Echo). -->
+            <div class="zone-picker" data-context="wait">
+                <span class="zone-picker-label">Where are you in the room?</span>
+                <div class="zone-grid">
+                    <button class="zone-btn" data-zone="A" aria-label="Zone A — top-left">A</button>
+                    <button class="zone-btn" data-zone="B" aria-label="Zone B — top-right">B</button>
+                    <button class="zone-btn zone-btn--center" data-zone="Center" aria-label="Center">Center</button>
+                    <button class="zone-btn" data-zone="C" aria-label="Zone C — bottom-centre">C</button>
+                </div>
             </div>
         </div>
     </div>

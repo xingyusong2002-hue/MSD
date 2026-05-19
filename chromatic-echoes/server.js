@@ -45,13 +45,37 @@ const ROUNDS = [
       target: { name: 'Teal', r: 15, g: 45, b: 40 } },
 ];
 
-// ---- Game State ----
-let game = createFreshGame();
+// ---- Domain constants (declared BEFORE the initial createFreshGame() call,
+// otherwise the temporal dead zone bites at module load — see commit history) ----
 
 // Outer museum walkthrough — independent of the per-round `phase` machine.
 // Visitors flow: waiting-room -> threshold -> dead-room -> archive.
 // All existing gameplay lives inside `experienceStage === 'dead-room'`.
 const STAGES = ['waiting-room', 'threshold', 'dead-room', 'archive'];
+
+// All player identities. Purple was added in the MVP Phase 2 pass. Targets
+// remain RGB — Purple's volume contributes 0.5 to R and 0.5 to B at the
+// centre mix (see computeLiveMix / computeAccumulatedMix below).
+const ROLES = ['red', 'green', 'blue', 'purple'];
+
+// Visitor-declared position in the Dead Room. No GPS — visitor taps a zone
+// button on their phone. Default 'Center'.
+const ZONES = ['A', 'B', 'C', 'Center'];
+
+// How the visitor describes the sound they want to make. Visible to the host
+// and embedded in archive records; does NOT alter mix maths in MVP.
+const SOUND_ROLES = ['voice', 'hum', 'clap', 'whisper', 'micro-sound'];
+
+// Build a {red:def, green:def, blue:def, purple:def} object for the
+// per-role maps below — avoids repeating the four keys everywhere.
+function perRole(defaultValue) {
+    const out = {};
+    for (const r of ROLES) out[r] = (typeof defaultValue === 'function') ? defaultValue() : defaultValue;
+    return out;
+}
+
+// ---- Game State ----
+let game = createFreshGame();
 
 function createFreshGame() {
     return {
@@ -59,9 +83,12 @@ function createFreshGame() {
         phase: 'lobby',                  // lobby | playing | success (inner, dead-room only)
         mode: 'live',                    // 'live' | 'accumulate'
         host: null,                      // ws connection
-        players: { red: null, green: null, blue: null },
-        volumes: { red: 0, green: 0, blue: 0 },
-        accumulated: { red: 0, green: 0, blue: 0 },  // for accumulate mode
+        players:     perRole(null),      // role -> ws | null
+        names:       perRole(''),        // role -> visitor-typed name (may be empty)
+        soundRoles:  perRole(''),        // role -> one of SOUND_ROLES, or '' if not set
+        zones:       perRole('Center'),  // role -> one of ZONES
+        volumes:     perRole(0),         // role -> 0..1, live volume from phone
+        accumulated: perRole(0),         // role -> for accumulate mode
         matchTimer: 0,
         roundIndex: 0,
         rounds: ROUNDS,
@@ -69,19 +96,27 @@ function createFreshGame() {
 }
 
 function getAvailableRoles() {
-    const roles = [];
-    if (!game.players.red) roles.push('red');
-    if (!game.players.green) roles.push('green');
-    if (!game.players.blue) roles.push('blue');
-    return roles;
+    return ROLES.filter(r => !game.players[r]);
 }
 
 function getConnectedPlayers() {
-    const list = [];
-    if (game.players.red) list.push('red');
-    if (game.players.green) list.push('green');
-    if (game.players.blue) list.push('blue');
-    return list;
+    return ROLES.filter(r => game.players[r]);
+}
+
+// Public descriptor for one role, sent inside the state broadcast. Lets the
+// projection / host UI render player chips, dots, contribution panels, etc.
+function getPlayerDescriptor(role) {
+    return {
+        role,
+        name: game.names[role] || '',
+        soundRole: game.soundRoles[role] || null,
+        zone: game.zones[role] || 'Center',
+        connected: !!game.players[role],
+        volume: game.volumes[role] || 0,
+    };
+}
+function getAllPlayerDescriptors() {
+    return ROLES.map(getPlayerDescriptor);
 }
 
 function getCurrentRound() {
@@ -99,11 +134,20 @@ function getCurrentTarget() {
     return getCurrentRound().target || null;
 }
 
+// Purple is a "blender" identity — its loudness contributes 0.5 to R and
+// 0.5 to B at the centre, so Mix Echo targets stay RGB while Purple players
+// still meaningfully boost the red+blue ends of the mix.
+function projectMixContributions(volumes) {
+    return {
+        r: volumes.red   + 0.5 * (volumes.purple || 0),
+        g: volumes.green,
+        b: volumes.blue  + 0.5 * (volumes.purple || 0),
+    };
+}
+
 // Compute current mix from LIVE volumes (Mode 1)
 function computeLiveMix() {
-    const rv = game.volumes.red;
-    const gv = game.volumes.green;
-    const bv = game.volumes.blue;
+    const { r: rv, g: gv, b: bv } = projectMixContributions(game.volumes);
     const total = rv + gv + bv;
     if (total < 0.001) return { r: 0, g: 0, b: 0, total: 0 };
     return {
@@ -116,9 +160,7 @@ function computeLiveMix() {
 
 // Compute current mix from ACCUMULATED values (Mode 2)
 function computeAccumulatedMix() {
-    const rv = game.accumulated.red;
-    const gv = game.accumulated.green;
-    const bv = game.accumulated.blue;
+    const { r: rv, g: gv, b: bv } = projectMixContributions(game.accumulated);
     const total = rv + gv + bv;
     if (total < 0.001) return { r: 0, g: 0, b: 0, total: 0 };
     return {
@@ -168,6 +210,7 @@ function broadcastState() {
         mode: game.mode,
         availableRoles: getAvailableRoles(),
         connectedPlayers: getConnectedPlayers(),
+        players: getAllPlayerDescriptors(),  // per-role: name, soundRole, zone, volume, connected
         hasHost: !!game.host,
         round: getCurrentRoundPublic(),
         target,
@@ -226,7 +269,7 @@ function startGameLoop() {
 
         // In accumulate mode, add current volumes to accumulated pool
         if (game.mode === 'accumulate') {
-            for (const color of ['red', 'green', 'blue']) {
+            for (const color of ROLES) {
                 if (game.volumes[color] > 0.02) {
                     game.accumulated[color] += game.volumes[color] * ACCUMULATE_RATE;
                 }
@@ -313,17 +356,50 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: 'assigned', role: 'host' }));
                     console.log('Host joined');
 
-                } else if (['red', 'green', 'blue'].includes(role)) {
+                } else if (ROLES.includes(role)) {
                     if (game.players[role]) {
                         ws.send(JSON.stringify({ type: 'error', message: `${role} is already taken` }));
                         return;
                     }
                     game.players[role] = ws;
                     ws._role = role;
+                    // Optional metadata can ride along with the join so the
+                    // host sees a populated lobby slot immediately, rather
+                    // than waiting for a separate set_meta round-trip.
+                    if (typeof msg.name === 'string')      game.names[role] = msg.name.slice(0, 40);
+                    if (SOUND_ROLES.includes(msg.soundRole)) game.soundRoles[role] = msg.soundRole;
+                    if (ZONES.includes(msg.zone))            game.zones[role] = msg.zone;
                     ws.send(JSON.stringify({ type: 'assigned', role }));
-                    console.log(`Player ${role} joined`);
+                    console.log(`Player ${role} joined (${msg.name || 'no name'}, ${msg.soundRole || '—'}, zone ${game.zones[role]})`);
                 }
 
+                broadcastState();
+                break;
+            }
+
+            case 'set_meta': {
+                // Visitor updates their name / sound-role from the Player
+                // Setup screen. Allowed only by an already-joined player on
+                // their own slot, and not while a round is actively playing
+                // (so the host's view is stable during the round).
+                const role = ws._role;
+                if (!role || !ROLES.includes(role)) return;
+                if (game.players[role] !== ws) return;
+                if (game.phase === 'playing') return;
+                if (typeof msg.name === 'string')        game.names[role] = msg.name.slice(0, 40);
+                if (SOUND_ROLES.includes(msg.soundRole)) game.soundRoles[role] = msg.soundRole;
+                broadcastState();
+                break;
+            }
+
+            case 'set_zone': {
+                // Visitor taps a zone button. Allowed any time so they can
+                // move during Move Echo or re-anchor between rounds. Default
+                // 'Center' if an unknown zone is sent.
+                const role = ws._role;
+                if (!role || !ROLES.includes(role)) return;
+                if (game.players[role] !== ws) return;
+                game.zones[role] = ZONES.includes(msg.zone) ? msg.zone : 'Center';
                 broadcastState();
                 break;
             }
@@ -345,8 +421,8 @@ wss.on('connection', (ws) => {
                 if (msg.stage !== 'dead-room' && game.phase === 'playing') {
                     stopGameLoop();
                     game.phase = 'lobby';
-                    game.volumes = { red: 0, green: 0, blue: 0 };
-                    game.accumulated = { red: 0, green: 0, blue: 0 };
+                    game.volumes = perRole(0);
+                    game.accumulated = perRole(0);
                     game.matchTimer = 0;
                 }
                 broadcastState();
@@ -369,8 +445,8 @@ wss.on('connection', (ws) => {
                 if (game.phase === 'lobby' || game.phase === 'success') {
                     game.phase = 'playing';
                     game.matchTimer = 0;
-                    game.volumes = { red: 0, green: 0, blue: 0 };
-                    game.accumulated = { red: 0, green: 0, blue: 0 };
+                    game.volumes = perRole(0);
+                    game.accumulated = perRole(0);
                     startGameLoop();
                     broadcastState();
                     console.log(`Round ${game.roundIndex + 1} started (${game.mode}): ${getCurrentRound().title}`);
@@ -388,8 +464,8 @@ wss.on('connection', (ws) => {
                 if (game.phase === 'lobby') return;
                 stopGameLoop();
                 game.phase = 'lobby';
-                game.volumes = { red: 0, green: 0, blue: 0 };
-                game.accumulated = { red: 0, green: 0, blue: 0 };
+                game.volumes = perRole(0);
+                game.accumulated = perRole(0);
                 game.matchTimer = 0;
                 broadcastState();
                 console.log('Host returned to lobby');
@@ -426,8 +502,8 @@ wss.on('connection', (ws) => {
                     }
                     game.phase = 'playing';
                     game.matchTimer = 0;
-                    game.volumes = { red: 0, green: 0, blue: 0 };
-                    game.accumulated = { red: 0, green: 0, blue: 0 };
+                    game.volumes = perRole(0);
+                    game.accumulated = perRole(0);
                     broadcastState();
                     console.log(`Next round (${game.mode}): ${getCurrentRound().title}`);
                 }
@@ -462,10 +538,18 @@ wss.on('connection', (ws) => {
             broadcastState();
             console.log('Host left — game reset');
         } else if (ws._role && game.players[ws._role] === ws) {
-            game.players[ws._role] = null;
-            game.volumes[ws._role] = 0;
+            const r = ws._role;
+            game.players[r] = null;
+            game.volumes[r] = 0;
+            game.accumulated[r] = 0;
+            // Clear the metadata so a future joiner on the same colour
+            // doesn't inherit the previous visitor's name / sound-role /
+            // zone. The colour itself becomes available again.
+            game.names[r] = '';
+            game.soundRoles[r] = '';
+            game.zones[r] = 'Center';
             broadcastState();
-            console.log(`Player ${ws._role} left`);
+            console.log(`Player ${r} left`);
         }
     });
 
@@ -477,6 +561,7 @@ wss.on('connection', (ws) => {
         mode: game.mode,
         availableRoles: getAvailableRoles(),
         connectedPlayers: getConnectedPlayers(),
+        players: getAllPlayerDescriptors(),
         hasHost: !!game.host,
         round: getCurrentRoundPublic(),
         target: getCurrentTarget(),
