@@ -116,12 +116,18 @@
         cloudLayers: 5,
         cloudMinOpacity: 0.22,
         cloudMaxOpacity: 0.55,
-        // ---- Source pulse rings (new) ----
-        ringMinCooldownMs: 220,         // minimum gap between ring spawns at full volume
-        ringMaxCooldownMs: 600,         // gap at threshold volume
-        ringBaseRadius: 40,             // expand from this
-        ringTravel: 220,                // max additional radius before fade-out
-        ringTravelSec: 1.4              // seconds to reach max radius
+        // ---- Source pulse rings — primary "proof it works" visual ----
+        // Tuned to be impossible to miss: rings travel far, start bright, fade
+        // slowly, and are thick enough to read from across a room.
+        ringMinCooldownMs: 110,         // min gap between spawns at full volume
+        ringMaxCooldownMs: 380,         // gap at threshold volume
+        ringBaseRadius: 24,             // start radius (small, so they "appear" at the source)
+        ringTravel: 420,                // total expansion before fade-out
+        ringTravelSec: 1.6,             // seconds to reach max radius
+        ringStartAlphaMin: 0.55,        // alpha at threshold volume
+        ringStartAlphaMax: 0.95,        // alpha at full volume
+        ringLineMin: 4,                 // stroke width at end of life
+        ringLineMax: 9                  // stroke width at birth
     };
 
     // ---- State ----
@@ -136,9 +142,13 @@
     // positions, and the contribution panel.
     let playersInfo = [];
     // Visitor's own choices, filled in across the Setup → Roles → Wait flow.
+    // myZone is empty until the visitor explicitly taps a zone button — that
+    // way we don't accidentally send 'Center' on join, which would override
+    // the server's per-role default (Red→A, Green→B, Blue→C). The wait-
+    // screen zone picker sets myZone the moment the visitor taps.
     let myName = '';
     let mySoundRole = '';
-    let myZone = 'Center';
+    let myZone = '';
     let audioCtx, analyser, timeDomainData;
 
     // Human-readable labels used on the HUD instruction strip.
@@ -215,11 +225,17 @@
     let simulatedVolumes = { red: 0, green: 0, blue: 0 };
     function simulateBurst(role) {
         if (!ROLES.includes(role)) return;
-        simulatedVolumes[role] = 0.75;
+        simulatedVolumes[role] = 0.85;   // start near full so the ring is obvious
         // Quick attack, slow decay so it looks like a real shout.
-        setTimeout(() => { simulatedVolumes[role] = 0.45; }, 180);
-        setTimeout(() => { simulatedVolumes[role] = 0.20; }, 480);
-        setTimeout(() => { simulatedVolumes[role] = 0.00; }, 900);
+        setTimeout(() => { simulatedVolumes[role] = 0.55; }, 200);
+        setTimeout(() => { simulatedVolumes[role] = 0.25; }, 600);
+        setTimeout(() => { simulatedVolumes[role] = 0.00; }, 1100);
+        // The simulation is local-only and must be VISIBLE even if the
+        // render loop isn't already running (e.g. host pressed R/G/B
+        // before entering the lobby, or before any phase transition).
+        // Kick the loop on so the next frame paints something.
+        if (!animationId) startRenderLoop();
+        if (debugVisible) console.log(`[sim] burst ${role} (LOCAL, not sent to server)`);
     }
 
     // Effective per-role volume = max(real mic volume, simulated keyboard burst).
@@ -228,6 +244,8 @@
         return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
     }
 
+    // Throttle for the debug-gated spawn log (one per role per second max).
+    const lastSpawnLogAt = { red: 0, green: 0, blue: 0 };
     function spawnSoundParticles(role, volume, src) {
         // Below the visual threshold, no particles at all. The pre-existing
         // mic gating is for ANALYSIS (sending to server); this one is for
@@ -235,6 +253,13 @@
         if (volume < CONFIG.volumeThresholdVisual) return;
         const color = COLORS[role];
         if (!color || !src) return;
+        if (debugVisible) {
+            const now = performance.now();
+            if (now - (lastSpawnLogAt[role] || 0) > 1000) {
+                lastSpawnLogAt[role] = now;
+                console.log(`[spawn] role=${role} vol=${volume.toFixed(2)} at (${Math.round(src.x)}, ${Math.round(src.y)}) active=${activeParticles.length}`);
+            }
+        }
         // Spawn count scales with volume. At threshold (0.04) it's about 1
         // per frame; at full it's ~6 per frame. The ceil() ensures a single
         // emission at the threshold rather than silent partials.
@@ -289,10 +314,11 @@
             // Dead Room rectangle stays meaningful.
             if (p.x < bounds.left || p.x > bounds.right
              || p.y < bounds.top  || p.y > bounds.bottom) continue;
-            // Centre-mix death — when they reach the middle, count them as
-            // having "joined the mix" and remove them. Otherwise the centre
-            // would clog with dots over time.
-            if (Math.abs(p.x - cx) < 18 && Math.abs(p.y - cy) < 18) continue;
+            // (Centre-mix death removed: when sources sat near the centre
+            // — which they did by default before the per-role zone fix —
+            // particles vanished the instant they spawned. Life + boundary
+            // already handle cleanup; nothing accumulates because life
+            // decays each frame.)
             if (p.life <= 0) continue;
             next.push(p);
         }
@@ -328,6 +354,7 @@
         const now = performance.now();
         if (now - lastRingAt[role] < cooldown) return;
         lastRingAt[role] = now;
+        const startAlpha = CONFIG.ringStartAlphaMin + (CONFIG.ringStartAlphaMax - CONFIG.ringStartAlphaMin) * Math.min(1, volume);
         activeRings.push({
             role,
             color: COLORS[role],
@@ -335,9 +362,14 @@
             y: src.y,
             born: now,
             duration: CONFIG.ringTravelSec * 1000,
-            maxRadius: CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.5 + 0.8 * volume),
-            startAlpha: 0.5 + 0.3 * volume,
+            // Larger maxRadius even at low volume so rings reach far enough
+            // to be visible from across the projection.
+            maxRadius: CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.7 + 0.5 * volume),
+            startAlpha,
         });
+        if (debugVisible) {
+            console.log(`[ring] role=${role} vol=${volume.toFixed(2)} from (${Math.round(src.x)}, ${Math.round(src.y)}) startAlpha=${startAlpha.toFixed(2)} maxR=${Math.round(CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.7 + 0.5 * volume))}`);
+        }
     }
 
     function updateRings() {
@@ -351,12 +383,16 @@
             const t = (now - r.born) / r.duration;   // 0..1
             if (t < 0 || t > 1) continue;
             const radius = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * t;
-            const alpha = r.startAlpha * (1 - t);
+            // Ease-out alpha for a "fade rather than vanish" feel.
+            const alpha = r.startAlpha * (1 - t) * (1 - t);
             if (alpha < 0.02) continue;
+            // Thick rings at birth, thinner as they expand — so the source is
+            // clearly the brightest point.
+            const lineW = CONFIG.ringLineMin + (CONFIG.ringLineMax - CONFIG.ringLineMin) * (1 - t);
             ctx.beginPath();
             ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${alpha.toFixed(3)})`;
-            ctx.lineWidth = 2 + (1 - t) * 1.5;
+            ctx.lineWidth = lineW;
             ctx.stroke();
         }
     }
@@ -644,6 +680,16 @@
         currentPhase = s.phase || currentPhase;
         connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];
         playersInfo      = Array.isArray(s.players)          ? s.players          : [];
+        // Mirror this client's assigned zone back into the local myZone +
+        // zone-picker highlight, so the player sees their default zone
+        // (e.g. A for Red) immediately after joining without tapping.
+        if (myRole && myRole !== 'host') {
+            const me = playersInfo.find(p => p.role === myRole);
+            if (me && ZONES.includes(me.zone) && me.zone !== myZone) {
+                myZone = me.zone;
+                zoneButtons.forEach(b => b.classList.toggle('active', b.dataset.zone === myZone));
+            }
+        }
         // Player zones live on each playersInfo entry. Recompute the
         // anchors so the next frame renders dots at the right zones.
         computePositions();
@@ -717,9 +763,16 @@
             if (s.phase === 'playing') {
                 showScreen('none'); showGameHud(true, s); startRenderLoop();
             } else if (s.phase === 'lobby') {
-                showGameHud(false); stopRenderLoop();
+                showGameHud(false);
                 if (myRole === 'host') showScreen('lobby');
                 else if (myRole) showScreen('playerWait');
+                // Host: keep the render loop alive across lobby ↔ playing
+                // transitions so R/G/B keyboard tests are immediately
+                // visible even before the round starts. Cheap when silent
+                // (no particles, no rings). Players still stop their loop
+                // in the lobby to avoid bandwidth/CPU on phones.
+                if (myRole === 'host') startRenderLoop();
+                else stopRenderLoop();
             }
         }
 
@@ -786,10 +839,20 @@
             : 'Thank you for visiting the Dead Room.';
     }
 
+    // Throttle for debug-gated frame log so we don't spam 30 lines per second.
+    let lastFrameLogAt = 0;
     function updateFrame(f) {
         gameMode = f.mode || gameMode;
         const kind = f.kind || (currentRound && currentRound.kind) || 'mix';
         lastFrameAt = performance.now();  // for the debug panel's "last frame: Xms ago"
+        if (debugVisible && lastFrameAt - lastFrameLogAt > 1000) {
+            lastFrameLogAt = lastFrameAt;
+            console.log('[frame] kind=' + kind + ' volumes=', f.volumes,
+                ' currentMix=', f.currentMix,
+                ' simulated=', { ...simulatedVolumes },
+                ' particles=' + activeParticles.length,
+                ' rings=' + activeRings.length);
+        }
 
         for (const c of ROLES) {
             const t = (f.volumes && f.volumes[c]) || 0;
@@ -862,12 +925,33 @@
         } else { btnNextRound.style.display = 'none'; successHint.textContent = 'Waiting for host to continue...'; }
     }
 
+    // Update the centre target swatch. SAFE for null target — non-mix rounds
+    // (solo / move / silent) have no target colour to paint, so we dim the
+    // swatch and label it as a listening round instead of dereferencing null.
+    // (Previously this threw on solo/move/silent, which is why startRenderLoop
+    // was never reached for non-mix rounds and the projection looked frozen.)
     function updateTargetDisplay(target, idx, total) {
-        const r = Math.round((target.r / 100) * 255), g = Math.round((target.g / 100) * 255), b = Math.round((target.b / 100) * 255);
+        roundNum.textContent = (idx || 0) + 1;
+        roundTotal.textContent = total || 0;
+        if (!target) {
+            targetSwatch.style.background = 'transparent';
+            targetSwatch.style.boxShadow = 'none';
+            targetSwatch.style.opacity = '0.25';
+            targetName.textContent = 'No target — listening round';
+            targetR.textContent = '—';
+            targetG.textContent = '—';
+            targetB.textContent = '—';
+            return;
+        }
+        const r = Math.round((target.r / 100) * 255);
+        const g = Math.round((target.g / 100) * 255);
+        const b = Math.round((target.b / 100) * 255);
         targetSwatch.style.background = `rgb(${r},${g},${b})`;
+        targetSwatch.style.opacity = '1';
         targetName.textContent = target.name;
-        targetR.textContent = target.r; targetG.textContent = target.g; targetB.textContent = target.b;
-        roundNum.textContent = idx + 1; roundTotal.textContent = total;
+        targetR.textContent = target.r;
+        targetG.textContent = target.g;
+        targetB.textContent = target.b;
     }
 
     // ---- Screen Management ----
@@ -884,7 +968,14 @@
     }
     function showGameHud(visible, state) {
         gameHud.classList.toggle('hidden', !visible);
-        if (visible && state) updateTargetDisplay(state.target, state.roundIndex, state.totalRounds);
+        if (visible && state) {
+            // Wrapped: a future bug in updateTargetDisplay (or any helper it
+            // calls) must NOT block the render loop start that follows this
+            // call. Catching here is cheap and the user will see the
+            // exception in the console; the canvas stays alive.
+            try { updateTargetDisplay(state.target, state.roundIndex, state.totalRounds); }
+            catch (e) { console.error('updateTargetDisplay failed:', e); }
+        }
     }
 
     // ---- Render Loop ----
@@ -980,7 +1071,10 @@
         if (myRole && myRole !== 'host') send({ type: 'set_zone', zone });
     }
     zoneButtons.forEach(b => b.addEventListener('click', () => applyZone(b.dataset.zone)));
-    applyZone('Center');   // default highlight
+    // No default highlight — the visitor's zone is whatever the server
+    // assigned them (per-role default: Red→A, Green→B, Blue→C) until they
+    // tap a button to change it. updateFromState() will reflect the
+    // current zone in the picker via the broadcast.
 
     roleCards.forEach(card => {
         card.addEventListener('click', async () => {

@@ -59,8 +59,11 @@ const STAGES = ['waiting-room', 'threshold', 'dead-room', 'archive'];
 const ROLES = ['red', 'green', 'blue'];
 
 // Visitor-declared position in the Dead Room. No GPS — visitor taps a zone
-// button on their phone. Default 'Center'.
+// button on their phone. Default per-role (so particle emitters don't all
+// stack at Center, where they'd be invisible against the mix glow); the
+// visitor can still tap Center on their phone if they actually stand there.
 const ZONES = ['A', 'B', 'C', 'Center'];
+const DEFAULT_ZONE_FOR = { red: 'A', green: 'B', blue: 'C' };
 
 // How the visitor describes the sound they want to make. Visible to the host
 // and embedded in archive records; does NOT alter mix maths in MVP.
@@ -357,7 +360,15 @@ wss.on('connection', (ws) => {
                     // than waiting for a separate set_meta round-trip.
                     if (typeof msg.name === 'string')      game.names[role] = msg.name.slice(0, 40);
                     if (SOUND_ROLES.includes(msg.soundRole)) game.soundRoles[role] = msg.soundRole;
-                    if (ZONES.includes(msg.zone))            game.zones[role] = msg.zone;
+                    // Zone: visitor's explicit choice wins. Otherwise default
+                    // to the role's natural corner (Red→A, Green→B, Blue→C)
+                    // so particles emit from a clearly visible position
+                    // instead of stacking at Center.
+                    if (ZONES.includes(msg.zone)) {
+                        game.zones[role] = msg.zone;
+                    } else {
+                        game.zones[role] = DEFAULT_ZONE_FOR[role] || 'Center';
+                    }
                     ws.send(JSON.stringify({ type: 'assigned', role }));
                     console.log(`Player ${role} joined (${msg.name || 'no name'}, ${msg.soundRole || '—'}, zone ${game.zones[role]})`);
                 }
@@ -536,7 +547,10 @@ wss.on('connection', (ws) => {
             // zone. The colour itself becomes available again.
             game.names[r] = '';
             game.soundRoles[r] = '';
-            game.zones[r] = 'Center';
+            // Reset to the role's natural corner, not 'Center' — so the
+            // next visitor on this colour starts visibly anchored even if
+            // they don't tap a zone button.
+            game.zones[r] = DEFAULT_ZONE_FOR[r] || 'Center';
             broadcastState();
             console.log(`Player ${r} left`);
         }
