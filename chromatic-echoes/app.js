@@ -118,6 +118,19 @@
         // ---- Event-driven particle emitter ----
         volumeThresholdVisual: 0.04,
         particlesPerFramePerVolume: 10,
+        // Multiplier applied AFTER volume scaling — tweakable for "feels
+        // empty vs feels chaotic" without changing the underlying volume
+        // curve. >1 = richer scatter; <1 = sparser.
+        particleScatterGain: 1.6,
+        // Global cap on simultaneously-alive particles. updateParticles
+        // trims oldest entries when this is exceeded so frame rate stays
+        // bounded even if three loud players + bursts run at once.
+        maxParticlesCap: 360,
+        // Angular spread at full volume (radians). Smaller = beam-like;
+        // larger = spherical scatter. Quiet volume narrows toward
+        // particleSpreadMin so soft sounds feel directional / contained.
+        particleSpreadMin: Math.PI * 0.45,   // ±40° at threshold
+        particleSpreadMax: Math.PI * 2.0,    // full circle at full volume
         particleMaxSpeed: 3.2,
         particleMinSize: 0.5,
         particleMaxSize: 2.2,
@@ -245,6 +258,18 @@
     const smoothedPositions = { red: clonePos(DEFAULT_NORM_POS.red),
                                 green: clonePos(DEFAULT_NORM_POS.green),
                                 blue: clonePos(DEFAULT_NORM_POS.blue) };
+    // ---- Doppler-inspired motion state ----
+    // Track the smoothedPositions of the PREVIOUS frame so we can compute
+    // a per-role velocity vector. roleVelocityScreen[role] holds velocity
+    // in SCREEN px/frame — that's what particle spawn + ring offset use.
+    // A second smoothing pass on the velocity itself avoids twitchy
+    // direction flips when the user makes a small touchpad correction.
+    const prevSmoothedPositions = { red: clonePos(DEFAULT_NORM_POS.red),
+                                    green: clonePos(DEFAULT_NORM_POS.green),
+                                    blue: clonePos(DEFAULT_NORM_POS.blue) };
+    const roleVelocityScreen = { red: { x: 0, y: 0 }, green: { x: 0, y: 0 }, blue: { x: 0, y: 0 } };
+    const VELOCITY_SMOOTH = 0.18;          // lerp factor for direction stability
+    const VELOCITY_MAX_PX_PER_FRAME = 18;  // safety clamp on huge teleports
     let audioCtx, analyser, timeDomainData;
 
     // Human-readable labels used on the HUD instruction strip.
@@ -288,11 +313,91 @@
     // The Dead Room "map" is the dashed quadrant box in style.css with
     // inset: 6vh 6vw. Particles must die when they leave it so they don't
     // travel forever across the whole screen.
+    // The "Dead Room" map: a centred near-square area on the projection.
+    // Previously this was a near-full-screen rectangle, which made the
+    // projection feel like an abstract canvas rather than a top-down room.
+    // Now: size = 78% of the smaller window dimension; slightly wider than
+    // tall (1.08:1) so it still looks like a room, not a perfect tile.
     function getMapBounds() {
         const w = window.innerWidth, h = window.innerHeight;
-        const padX = w * 0.06;
-        const padY = h * 0.06;
-        return { left: padX, right: w - padX, top: padY, bottom: h - padY };
+        const size  = Math.min(w, h) * 0.78;
+        const roomW = size * 1.08;
+        const roomH = size;
+        const cx = w / 2, cy = h / 2;
+        return {
+            left:   cx - roomW / 2,
+            right:  cx + roomW / 2,
+            top:    cy - roomH / 2,
+            bottom: cy + roomH / 2,
+            width:  roomW,
+            height: roomH,
+            cx, cy,
+        };
+    }
+
+    // Trace the room rectangle as a path on whichever ctx is passed in.
+    // Used both for stroking the boundary AND as the clip path that keeps
+    // every visual layer (rings, particles, paint canvas) inside the room.
+    function drawRoomPath(c) {
+        const b = getMapBounds();
+        c.beginPath();
+        // Slightly rounded corners so the room reads as architectural,
+        // not as a CSS div.
+        const r = 14;
+        c.moveTo(b.left + r, b.top);
+        c.lineTo(b.right - r, b.top);
+        c.arcTo(b.right, b.top, b.right, b.top + r, r);
+        c.lineTo(b.right, b.bottom - r);
+        c.arcTo(b.right, b.bottom, b.right - r, b.bottom, r);
+        c.lineTo(b.left + r, b.bottom);
+        c.arcTo(b.left, b.bottom, b.left, b.bottom - r, r);
+        c.lineTo(b.left, b.top + r);
+        c.arcTo(b.left, b.top, b.left + r, b.top, r);
+    }
+
+    function isInsideRoom(x, y) {
+        const b = getMapBounds();
+        return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+    }
+
+    // Subtle boundary stroke + corner ticks. Reads as "this is the room"
+    // without becoming a hard UI frame.
+    function drawRoomBoundary() {
+        const b = getMapBounds();
+        ctx.save();
+        // Faint primary stroke
+        drawRoomPath(ctx);
+        ctx.strokeStyle = 'rgba(255,255,255,0.085)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Even fainter inset stroke (1.5px in) for depth
+        ctx.save();
+        ctx.translate(2, 2);
+        drawRoomPath(ctx);
+        ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+        // Tiny corner ticks — minimal, dark, suggest acoustic-foam corners
+        const tick = 14;
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+        const corners = [
+            [b.left,  b.top,    1,  1],   // top-left
+            [b.right, b.top,   -1,  1],   // top-right
+            [b.left,  b.bottom, 1, -1],   // bottom-left
+            [b.right, b.bottom,-1, -1],   // bottom-right
+        ];
+        for (const [x, y, sx, sy] of corners) {
+            ctx.beginPath();
+            ctx.moveTo(x + sx * 4,    y);
+            ctx.lineTo(x + sx * tick, y);
+            ctx.moveTo(x,             y + sy * 4);
+            ctx.lineTo(x,             y + sy * tick);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 
     // ---- Offscreen "paint canvas" (Fill Mode memory layer) ----
@@ -401,23 +506,54 @@
                 console.log(`[spawn] role=${role} vol=${volume.toFixed(2)} at (${Math.round(src.x)}, ${Math.round(src.y)}) active=${activeParticles.length}`);
             }
         }
-        // Spawn count scales with volume. At threshold (0.04) it's about 1
-        // per frame; at full it's ~6 per frame. The ceil() ensures a single
-        // emission at the threshold rather than silent partials.
-        const count = Math.max(1, Math.round(volume * CONFIG.particlesPerFramePerVolume));
+        // Spawn count scales with volume + scatter gain. Quiet sound emits
+        // a thin trickle; loud sound emits a small cloud. The gain knob
+        // lets us tune "feels empty vs feels chaotic" without rewriting.
+        const count = Math.max(1, Math.round(
+            volume * CONFIG.particlesPerFramePerVolume * CONFIG.particleScatterGain
+        ));
+
+        // Angular spread widens with volume: at threshold (~0.04) only a
+        // narrow cone emits; at full volume the spread fills the circle.
+        const spread = CONFIG.particleSpreadMin
+            + (CONFIG.particleSpreadMax - CONFIG.particleSpreadMin) * Math.min(1, volume * 2);
+
+        // Doppler-inspired motion bias: if the source has been moving
+        // while speaking, weight particle angles toward the motion vector
+        // and add a fraction of velocity to each particle's initial v.
+        // roleVelocityScreen is updated by computeRoleVelocities() each
+        // frame. Quiet motion has no effect (speed below threshold).
+        const v = roleVelocityScreen[role] || { x: 0, y: 0 };
+        const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
+        const moving = speedPx > 0.6;
+        const motionAngle = moving ? Math.atan2(v.y, v.x) : null;
+
         for (let i = 0; i < count; i++) {
-            // Radially outward from the source with a small random arc, so
-            // the ripple looks like a stone hitting water rather than a beam.
-            const angle = Math.random() * Math.PI * 2;
-            const speed = 0.6 + Math.random() * CONFIG.particleMaxSpeed * (0.4 + volume);
+            // Base radial angle, biased toward motion if applicable.
+            let angle;
+            if (motionAngle !== null && Math.random() < 0.72) {
+                // 72% of particles fall within ±60° of the motion vector
+                // → directional / "pushed" feel without becoming a beam.
+                angle = motionAngle + (Math.random() - 0.5) * (Math.PI / 1.5);
+            } else {
+                // Otherwise spread within the volume-derived cone, with
+                // a random pivot so we don't get banding.
+                const pivot = Math.random() * Math.PI * 2;
+                angle = pivot + (Math.random() - 0.5) * spread;
+            }
+            const baseSpeed = 0.6 + Math.random() * CONFIG.particleMaxSpeed * (0.4 + volume);
+            // Carry-along: add a fraction of source velocity. Subtle —
+            // particles still expand radially, but the cloud as a whole
+            // shifts forward when the source is moving.
+            const carry = moving ? 0.35 : 0;
             const sizeRange = CONFIG.particleMaxSize - CONFIG.particleMinSize;
             activeParticles.push({
                 role,
                 color,
                 x: src.x + (Math.random() - 0.5) * 8,
                 y: src.y + (Math.random() - 0.5) * 8,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
+                vx: Math.cos(angle) * baseSpeed + v.x * carry,
+                vy: Math.sin(angle) * baseSpeed + v.y * carry,
                 size: CONFIG.particleMinSize + Math.random() * sizeRange * (0.4 + volume * 0.6),
                 // Mode-driven lifetime: Live Mix particles die quickly; Fill
                 // Mode particles linger so movement traces stay visible.
@@ -471,6 +607,13 @@
             if (p.life <= 0) continue;
             next.push(p);
         }
+        // Global cap: if we exceeded maxParticlesCap (e.g. three loud
+        // players + collision bursts firing at once), trim the OLDEST
+        // particles first. They have the least life left anyway, so
+        // visually this is the least-disruptive eviction policy.
+        if (next.length > CONFIG.maxParticlesCap) {
+            next.splice(0, next.length - CONFIG.maxParticlesCap);
+        }
         activeParticles = next;
     }
 
@@ -497,19 +640,38 @@
 
     function maybeSpawnRing(role, src, volume) {
         if (volume < CONFIG.volumeThresholdVisual) return;
-        // Loud volume = shorter cooldown = more frequent rings.
-        const t = (1 - Math.min(1, volume)); // 0 at full, 1 at threshold
-        const cooldown = CONFIG.ringMinCooldownMs + t * (CONFIG.ringMaxCooldownMs - CONFIG.ringMinCooldownMs);
+        // Doppler bias: when the source is moving, shorten the cooldown
+        // (more rings in flight at once) and offset the spawn position
+        // slightly forward in the motion direction. The combined effect
+        // reads as compressed waves in front, sparser behind — visual
+        // metaphor for Doppler without simulating actual physics.
+        const v = roleVelocityScreen[role] || { x: 0, y: 0 };
+        const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
+        const moving = speedPx > 0.6;
+        const motionGain = moving ? Math.min(1, speedPx / 8) : 0;
+
+        // Loud volume = shorter cooldown = more frequent rings; motion
+        // shortens it further.
+        const tt = (1 - Math.min(1, volume));
+        const baseCd = CONFIG.ringMinCooldownMs + tt * (CONFIG.ringMaxCooldownMs - CONFIG.ringMinCooldownMs);
+        const cooldown = baseCd * (1 - motionGain * 0.45);
         const now = performance.now();
         if (now - lastRingAt[role] < cooldown) return;
         lastRingAt[role] = now;
+
+        // Spawn offset forward in motion direction (subtle — capped at
+        // ringBaseRadius so the centre stays near the source).
+        const offMag = motionGain * CONFIG.ringBaseRadius * 0.6;
+        const offX = moving ? (v.x / Math.max(0.001, speedPx)) * offMag : 0;
+        const offY = moving ? (v.y / Math.max(0.001, speedPx)) * offMag : 0;
+
         const startAlpha = CONFIG.ringStartAlphaMin + (CONFIG.ringStartAlphaMax - CONFIG.ringStartAlphaMin) * Math.min(1, volume);
         const ringLifeMul = getModeConfig().ringLifeMul;
         activeRings.push({
             role,
             color: COLORS[role],
-            x: src.x,
-            y: src.y,
+            x: src.x + offX,
+            y: src.y + offY,
             born: now,
             // Duration scaled by mode + slightly by volume — loud rings linger
             // a little longer, so the wavefront feels like it has presence.
@@ -547,6 +709,110 @@
             ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${alpha.toFixed(3)})`;
             ctx.lineWidth = lineW;
             ctx.stroke();
+        }
+    }
+
+    // ---- Cross-role collision bursts ----
+    // When two different-role particles overlap, we want a quick flash in
+    // the blended colour at their midpoint. The naïve approach (O(n²)
+    // pairwise distance every frame) burns CPU; instead we bucket
+    // particles into a coarse grid keyed by floor(x/cell), floor(y/cell)
+    // and only check pairs that share a cell. With caps on bursts-per-
+    // frame and per-cell cooldown, the worst case stays bounded.
+    const COLLISION = {
+        cellSize: 32,             // grid cell ≈ collision radius
+        radius: 22,               // particles within this many px collide
+        maxBurstsPerFrame: 6,
+        burstDurationMs: 540,
+        maxRadius: 26,
+        cooldownMs: 220,          // per-cell cooldown, no repeat in same area
+    };
+    let activeCollisionBursts = [];
+    const cellCooldowns = new Map();  // cellKey → performance.now() of last burst
+
+    function spawnCollisionBurst(x, y, colorA, colorB) {
+        // Blend the two role colours. Average works well visually for the
+        // {red,green,blue} palette: red+blue ≈ purple-magenta, red+green ≈
+        // amber, green+blue ≈ teal — matching the user's stated intent.
+        const r = Math.round((colorA.r + colorB.r) / 2);
+        const g = Math.round((colorA.g + colorB.g) / 2);
+        const b = Math.round((colorA.b + colorB.b) / 2);
+        activeCollisionBursts.push({
+            x, y, r, g, b,
+            born: performance.now(),
+            duration: COLLISION.burstDurationMs,
+            maxR: COLLISION.maxRadius,
+        });
+    }
+
+    function detectCollisions() {
+        if (activeParticles.length < 2) return;
+        const cell = COLLISION.cellSize;
+        const radSq = COLLISION.radius * COLLISION.radius;
+        const grid = new Map();
+        for (const p of activeParticles) {
+            const key = (Math.floor(p.x / cell)) + ',' + (Math.floor(p.y / cell));
+            let bucket = grid.get(key);
+            if (!bucket) { bucket = []; grid.set(key, bucket); }
+            bucket.push(p);
+        }
+        const now = performance.now();
+        let burstsThisFrame = 0;
+        for (const [key, bucket] of grid) {
+            if (bucket.length < 2) continue;
+            // Per-cell cooldown: avoid a hot region spawning a burst on
+            // every frame — that creates the "white spot of doom".
+            const lastAt = cellCooldowns.get(key);
+            if (lastAt && now - lastAt < COLLISION.cooldownMs) continue;
+            // Pairwise check inside the cell only — at most a handful of
+            // particles per cell, so this is cheap.
+            outer:
+            for (let i = 0; i < bucket.length; i++) {
+                const a = bucket[i];
+                for (let j = i + 1; j < bucket.length; j++) {
+                    const b = bucket[j];
+                    if (a.role === b.role) continue;
+                    const dx = a.x - b.x, dy = a.y - b.y;
+                    if (dx * dx + dy * dy <= radSq) {
+                        spawnCollisionBurst((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, a.color, b.color);
+                        cellCooldowns.set(key, now);
+                        burstsThisFrame++;
+                        if (burstsThisFrame >= COLLISION.maxBurstsPerFrame) return;
+                        break outer;
+                    }
+                }
+            }
+        }
+        // Periodically prune stale cooldown entries so the Map doesn't grow.
+        if (cellCooldowns.size > 200) {
+            for (const [k, t] of cellCooldowns) {
+                if (now - t > COLLISION.cooldownMs * 4) cellCooldowns.delete(k);
+            }
+        }
+    }
+
+    function updateCollisionBursts() {
+        const now = performance.now();
+        activeCollisionBursts = activeCollisionBursts.filter(b => now - b.born < b.duration);
+    }
+
+    function drawCollisionBursts() {
+        const now = performance.now();
+        for (const b of activeCollisionBursts) {
+            const t = (now - b.born) / b.duration;     // 0..1
+            const radius = b.maxR * (0.4 + t * 0.6);
+            // Bright at birth, fade fast (ease-out cubic) so they read as
+            // sparks rather than slow blooms.
+            const a = (1 - t) * (1 - t) * 0.75;
+            if (a < 0.02) continue;
+            const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius);
+            grad.addColorStop(0,   `rgba(${b.r},${b.g},${b.b},${a.toFixed(3)})`);
+            grad.addColorStop(0.5, `rgba(${b.r},${b.g},${b.b},${(a * 0.4).toFixed(3)})`);
+            grad.addColorStop(1,   `rgba(${b.r},${b.g},${b.b},0)`);
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, radius, 0, Math.PI * 2);
+            ctx.fill();
         }
     }
 
@@ -1340,17 +1606,38 @@
             send({ type: 'volume', level: vol });
         }
 
-        // ---- Position lerp ----
-        // Glide smoothedPositions toward targetPositions every frame so a
-        // touchpad drag (or a host_set_position keyboard shortcut) doesn't
-        // teleport the dot — it drifts. Then derive screen coords from
-        // the smoothed values, NOT from discrete zones.
+        // ---- Position lerp + velocity (Doppler-inspired motion state) ----
+        // Glide smoothedPositions toward targetPositions and, while we have
+        // the previous smoothed values in hand, derive each role's velocity
+        // in SCREEN px/frame. The velocity is itself lerp-smoothed so it
+        // stays useful through small touchpad corrections rather than
+        // twitching back to zero between drags.
         const lerpRate = CONFIG.positionLerpRate;
         for (const role of ROLES) {
-            const t = targetPositions[role], s = smoothedPositions[role];
+            const t = targetPositions[role];
+            const s = smoothedPositions[role];
+            // Cache the smoothed value BEFORE the lerp so we can diff it.
+            const prev = prevSmoothedPositions[role];
+            prev.x = s.x; prev.y = s.y;
             s.x += (t.x - s.x) * lerpRate;
             s.y += (t.y - s.y) * lerpRate;
             sourcePositions[role] = getScreenPositionFromNormalised(s);
+            // Velocity in SCREEN units (px/frame), via the previous → current
+            // smoothed delta projected through getScreenPositionFromNormalised.
+            const prevScreen = getScreenPositionFromNormalised(prev);
+            let dvx = sourcePositions[role].x - prevScreen.x;
+            let dvy = sourcePositions[role].y - prevScreen.y;
+            // Safety clamp on huge jumps (target snapping, window resize).
+            const mag = Math.sqrt(dvx * dvx + dvy * dvy);
+            if (mag > VELOCITY_MAX_PX_PER_FRAME) {
+                const k = VELOCITY_MAX_PX_PER_FRAME / mag;
+                dvx *= k; dvy *= k;
+            }
+            // Smooth the velocity itself so a single-frame jitter doesn't
+            // flip the motion direction.
+            const v = roleVelocityScreen[role];
+            v.x += (dvx - v.x) * VELOCITY_SMOOTH;
+            v.y += (dvy - v.y) * VELOCITY_SMOOTH;
         }
 
         // ---- Paint canvas (Fill Mode memory layer) ----
@@ -1371,46 +1658,58 @@
             // Soft destination-out to clear lingering paint over a few seconds.
             fadePaintCanvas(0.04);
         }
-        // Blit the paint canvas onto the main canvas AFTER the main trail
-        // fade has already darkened the frame. The paint reads as a layer
-        // beneath the rings/particles drawn next.
+
+        // ────────────────────────────────────────────────────────────────
+        // EVERYTHING THAT BELONGS INSIDE THE ROOM goes inside this clip.
+        // The paint canvas, rings, particles, source clouds, collision
+        // bursts — all clipped to the room rectangle. Effects can no
+        // longer leak across the whole projection.
+        // ────────────────────────────────────────────────────────────────
+        ctx.save();
+        drawRoomPath(ctx);
+        ctx.clip();
+
+        // Paint canvas (Fill Mode memory) — clipped means stamps near the
+        // room edge are masked at the boundary even if their gradients
+        // would otherwise reach further.
         ctx.drawImage(paintCanvas, 0, 0, window.innerWidth, window.innerHeight);
 
-        // Per-role anchors + emitters. Each role is independent — a silent
-        // role draws nothing (no faint cloud, no particles, no ring).
+        // Per-role anchors + emitters.
         for (const color of ROLES) {
             const src = sourcePositions[color];
             if (!src) continue;
             const realVol = smoothVolumes[color] || 0;
             const simVol  = simulatedVolumes[color] || 0;
             const vol = Math.max(realVol, simVol);
-            // Connected = a phone has joined OR a keyboard burst is active.
-            // The latter is for the host-only R/G/B test shortcuts.
             const isConnected = connectedPlayers.includes(color) || simVol > 0;
 
-            // Always draw a small dot at a connected role's anchor, even at
-            // zero volume — so visitors see WHERE their colour will appear.
             if (isConnected) drawSourceDot(src.x, src.y, vol, color, true);
 
-            // Above the visual threshold: the role is actively audible.
-            // Spawn a source cloud + pulse rings + sound particles.
             if (vol >= CONFIG.volumeThresholdVisual) {
                 drawSourceCloud(src.x, src.y, vol, color);
                 maybeSpawnRing(color, src, vol);
                 spawnSoundParticles(color, vol, src);
             }
 
-            // Source labels (RED / GREEN / BLUE + status) are diagnostic
-            // only — keep the museum projection clean. Show in debug mode.
             if (isConnected && debugVisible) drawSourceLabel(src.x, src.y, color, true);
         }
 
-        // Update + draw the pulse rings and the active-particle list. Rings
-        // are drawn BELOW particles so particles read on top of them.
+        // Rings, particles, collision bursts — all inside the clip.
         updateRings();
         drawRings();
         updateParticles();
+        // Collision detection runs AFTER particle update so positions are
+        // current. Bursts are spawned outside the clip would still draw
+        // here because we run drawCollisionBursts() inside this region.
+        detectCollisions();
+        updateCollisionBursts();
+        drawCollisionBursts();
         drawParticles();
+
+        ctx.restore();
+        // The boundary itself draws AFTER the clip restore so the stroke
+        // sits crisply on top of any colour bleeding to the edge.
+        drawRoomBoundary();
 
         // Centre region. Mode-specific:
         //   • Fill Mode: broad, soft accumulation field — "the room remembers"

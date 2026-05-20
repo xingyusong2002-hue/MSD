@@ -2009,12 +2009,21 @@ body {
    below the canvas trail so it doesn't compete for attention. The grid is
    four cells arranged: A | B  /  Center (full-width)  /  C (full-width).
    Mirrors the room layout the visitor sees on their phone's zone picker. */
+/* DOM dead-room-map is now hidden — the canvas draws the room boundary
+   directly so it can match the JS getMapBounds() exactly. The CSS-based
+   grid would only desync with the canvas after the new square-ish bounds.
+   Keeping the markup in place harmlessly in case future versions want it. */
 .dead-room-map {
-    position: absolute;
-    inset: 6vh 6vw;            /* leave breathing room around the edges */
-    z-index: 0;                /* below particles (canvas is z-1) */
-    pointer-events: none;
+    display: none;
+}
+.dead-room-map--legacy {
+    /* Restorable: add `dead-room-map--legacy` to #deadRoomMap to bring the
+       old CSS overlay back for visual A/B comparison. */
     display: flex;
+    position: absolute;
+    inset: 6vh 6vw;
+    z-index: 0;
+    pointer-events: none;
     flex-direction: column;
 }
 .drm-grid {
