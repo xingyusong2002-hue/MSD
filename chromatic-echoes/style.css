@@ -482,6 +482,65 @@ body {
 }
 
 /* ---- Lobby ---- */
+/* Multi-device testing block — shown to the host in the lobby. */
+.lobby-network-info {
+    margin: 0 auto 1.6em;
+    max-width: 520px;
+    text-align: left;
+    color: var(--c-text-dim);
+}
+.lobby-network-title {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--c-text-dim);
+    margin-bottom: 0.6em;
+}
+.lobby-network-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1em;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+}
+.lobby-network-list li {
+    padding: 9px 14px;
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 0.85rem;
+    color: var(--c-text);
+    border-bottom: 1px solid oklch(100% 0 0 / 0.04);
+}
+.lobby-network-list li:last-child { border-bottom: none; }
+.lobby-network-list code {
+    background: transparent;
+    color: var(--c-text);
+}
+.lobby-network-iface {
+    color: var(--c-text-dim);
+    font-size: 0.72rem;
+    margin-left: 8px;
+}
+.lobby-network-empty {
+    font-style: italic;
+    color: var(--c-text-dim);
+}
+.lobby-network-hint {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    line-height: 1.55;
+    color: var(--c-text-dim);
+}
+.lobby-network-hint code {
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 0.78rem;
+    color: var(--c-text);
+    background: oklch(100% 0 0 / 0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
 .lobby-url {
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
@@ -1258,6 +1317,9 @@ body {
    inside the game HUD. */
 .screen-back--secondary {
     left: 170px;
+}
+.screen-back--tertiary {
+    left: 330px;          /* offset from the Back-to-lobby button */
 }
 
 /* ---- Connection-status indicator ----

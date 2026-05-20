@@ -243,6 +243,11 @@ function broadcastState() {
         accumulated: game.accumulated,
         currentMix: mix,
         matchTimer: game.matchTimer,
+        // Multi-device testing: host lobby renders these as phone-reachable
+        // URLs ("http://<address>:<port>"). Includes interface name so a
+        // host with multiple adapters can identify the right one.
+        serverIPs: getLocalIPs(),
+        serverPort: PORT,
     });
 }
 
@@ -485,6 +490,17 @@ wss.on('connection', (ws) => {
                 break;
             }
 
+            case 'clear_fill': {
+                // Host clears the Fill Mode paint canvas on every connected
+                // projection. No game-state change — just a fan-out event
+                // so all clients erase their offscreen paint layer at the
+                // same time, keeping the museum installation in sync.
+                if (ws._role !== 'host') return;
+                broadcast({ type: 'clear_fill' });
+                console.log('Host cleared Fill paint');
+                break;
+            }
+
             case 'set_stage': {
                 if (ws._role !== 'host') return;
                 if (!STAGES.includes(msg.stage)) return;
@@ -649,6 +665,10 @@ wss.on('connection', (ws) => {
         accumulated: game.accumulated,
         currentMix: computeCurrentMix(),
         matchTimer: game.matchTimer,
+        // Same multi-device info as broadcastState — so a fresh tab knows
+        // the LAN URLs immediately, before any subsequent broadcast.
+        serverIPs: getLocalIPs(),
+        serverPort: PORT,
     }));
 });
 
@@ -669,4 +689,27 @@ function getLocalIP() {
         }
     }
     return 'localhost';
+}
+
+// Return ALL non-internal IPv4 addresses (a laptop often has more than one
+// — Wi-Fi, ethernet, virtual adapters). The host lobby shows each as a
+// URL phones can try; the visitor picks whichever matches their network.
+// Cached because os.networkInterfaces() is occasionally expensive on Windows.
+let cachedLocalIPs = null;
+let cachedLocalIPsAt = 0;
+function getLocalIPs() {
+    const now = Date.now();
+    if (cachedLocalIPs && now - cachedLocalIPsAt < 10000) return cachedLocalIPs;
+    const out = [];
+    const nets = require('os').networkInterfaces();
+    for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+                out.push({ name, address: net.address });
+            }
+        }
+    }
+    cachedLocalIPs = out;
+    cachedLocalIPsAt = now;
+    return out;
 }

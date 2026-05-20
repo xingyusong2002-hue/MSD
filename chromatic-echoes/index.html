@@ -149,7 +149,21 @@
         <div class="screen-content">
             <h2 class="screen-title">Waiting for Players</h2>
             <p class="screen-subtitle">Share the URL with your teammates</p>
+            <!-- Phone-reachable URLs + multi-device testing notes. Filled
+                 in from server-broadcast serverIPs after Host joins. -->
             <div id="lobbyUrl" class="lobby-url"></div>
+            <div id="lobbyNetworkInfo" class="lobby-network-info">
+                <p class="lobby-network-title">Phones on the same Wi-Fi as this computer can open:</p>
+                <ul id="lobbyNetworkList" class="lobby-network-list">
+                    <li class="lobby-network-empty">discovering local addresses…</li>
+                </ul>
+                <p class="lobby-network-hint">
+                    If a phone's microphone permission dialog never appears,
+                    most mobile browsers require an HTTPS URL. Run an HTTPS
+                    tunnel (e.g. <code>cloudflared tunnel --url http://localhost:8080</code>
+                    or <code>ngrok http 8080</code>) and share that URL instead.
+                </p>
+            </div>
 
             <!-- Mode Selector -->
             <div class="mode-selector">
@@ -236,6 +250,11 @@
              mode-and-start lobby. Lets the host change Live Mix / Fill Mode or
              pick a different starting round. Visible during play only. -->
         <button id="btnBackToLobby" class="btn btn-ghost screen-back screen-back--secondary hidden">Back to lobby ↺</button>
+
+        <!-- Host-only "Clear Fill" — wipes the Fill Mode paint canvas on
+             every connected projection at once via a WS broadcast. Visible
+             only when host is in dead-room AND mode is 'accumulate'. -->
+        <button id="btnClearFill" class="btn btn-ghost screen-back screen-back--tertiary hidden">Clear Fill</button>
 
         <!-- Mode badge (top left) -->
         <div id="modeBadge" class="mode-badge">

@@ -37,6 +37,7 @@
     const btnWaitingBack = document.getElementById('btnWaitingBack');
     const btnHudExit = document.getElementById('btnHudExit');
     const btnBackToLobby = document.getElementById('btnBackToLobby');
+    const btnClearFill = document.getElementById('btnClearFill');
     const btnPlayerBack = document.getElementById('btnPlayerBack');
     const hudEmptyHint = document.getElementById('hudEmptyHint');
     const btnHost = document.getElementById('btnHost');
@@ -44,6 +45,7 @@
     const roleCards = document.querySelectorAll('.role-card');
     const btnBackToLanding = document.getElementById('btnBackToLanding');
     const lobbyUrl = document.getElementById('lobbyUrl');
+    const lobbyNetworkList = document.getElementById('lobbyNetworkList');
     const btnStartRound = document.getElementById('btnStartRound');
     const modeBtns = document.querySelectorAll('.mode-btn');
     const lobbySlots = {
@@ -289,6 +291,59 @@
         const padY = h * 0.06;
         return { left: padX, right: w - padX, top: padY, bottom: h - padY };
     }
+
+    // ---- Offscreen "paint canvas" (Fill Mode memory layer) ----
+    // A separate canvas where Fill Mode stamps low-alpha colour blobs at each
+    // speaking player's current source position. Persists across frames so
+    // visitors visibly PAINT the room along their movement path. Live Mix
+    // does not stamp here, and applies a soft fade so any leftover paint
+    // from a previous Fill Mode round clears within a few seconds.
+    //
+    // Why a separate canvas, not just lower trail alpha on the main canvas:
+    // the main canvas fades rings + particles aggressively. If trail alpha
+    // were low enough to keep paint, stale rings would also persist and
+    // muddy the picture. Independent layers = independent fade policy.
+    const paintCanvas = document.createElement('canvas');
+    const paintCtx    = paintCanvas.getContext('2d');
+    function resizePaintCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        paintCanvas.width  = window.innerWidth  * dpr;
+        paintCanvas.height = window.innerHeight * dpr;
+        paintCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    function clearPaintCanvas() {
+        paintCtx.save();
+        paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+        paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+        paintCtx.restore();
+    }
+    // Stamp a soft radial blob at (x, y) on the paint canvas, in role colour.
+    function stampPaint(x, y, color, volume) {
+        const blobR = 70 + volume * 60;
+        // Higher alpha than the previous main-canvas stamp because this
+        // layer does NOT get the main canvas's trail fade — colour builds.
+        const alpha = 0.045 + volume * 0.08;
+        const grad = paintCtx.createRadialGradient(x, y, 0, x, y, blobR);
+        grad.addColorStop(0,   `rgba(${color.r},${color.g},${color.b},${alpha.toFixed(3)})`);
+        grad.addColorStop(0.6, `rgba(${color.r},${color.g},${color.b},${(alpha * 0.4).toFixed(3)})`);
+        grad.addColorStop(1,   `rgba(${color.r},${color.g},${color.b},0)`);
+        paintCtx.fillStyle = grad;
+        paintCtx.beginPath();
+        paintCtx.arc(x, y, blobR, 0, Math.PI * 2);
+        paintCtx.fill();
+    }
+    // Slow erase used by Live Mix to clear leftover paint from a previous
+    // Fill Mode round. Uses destination-out so it removes colour rather
+    // than darkening it. Alpha is small — clears in ~2-3 s.
+    function fadePaintCanvas(amount) {
+        paintCtx.save();
+        paintCtx.globalCompositeOperation = 'destination-out';
+        paintCtx.fillStyle = `rgba(0,0,0,${amount})`;
+        paintCtx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+        paintCtx.restore();
+    }
+    resizePaintCanvas();
+    window.addEventListener('resize', resizePaintCanvas);
 
     // ---- Event-driven particle emitter ----
     // Replaces the old pre-allocated pool (which never depleted — particles
@@ -643,7 +698,30 @@
             source.connect(analyser); timeDomainData = new Float32Array(analyser.fftSize);
             startMicMeter(); // diagnostic preview on the wait screen
             return true;
-        } catch (e) { console.error('Mic denied:', e); alert('Microphone access is required to play.'); return false; }
+        } catch (e) {
+            // Surface the actual error so on-phone debugging isn't guesswork.
+            // The two most common failure modes:
+            //   • NotAllowedError — user denied the permission prompt.
+            //   • NotSupportedError / SecurityError — page is HTTP and the
+            //     phone's browser refuses getUserMedia outside a secure
+            //     context (HTTPS or localhost). The HTTPS-tunnel hint
+            //     below tells visitors what to do about it.
+            const errName = (e && e.name) || 'UnknownError';
+            const errMsg  = (e && e.message) || String(e);
+            console.error('Mic init failed:', errName, errMsg, e);
+            const isHttp = location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+            const message = [
+                `Microphone error — ${errName}`,
+                '',
+                errMsg,
+                '',
+                isHttp
+                    ? 'This page is loaded over HTTP from a LAN address. Most mobile browsers block microphone access unless the page is served over HTTPS or from localhost. Run an HTTPS tunnel (e.g. `cloudflared tunnel --url http://localhost:8080` or `ngrok http 8080`) and share that URL with phones.'
+                    : 'Check the browser permission dialog. If you accidentally denied it, click the address-bar permission icon to re-allow Microphone, then refresh.',
+            ].join('\n');
+            alert(message);
+            return false;
+        }
     }
     // Raw RMS, no threshold subtraction. Used by the diagnostic meter so
     // visitors see ANY sound (including breathing) as movement — confirming
@@ -820,14 +898,50 @@
             case 'state': updateFromState(msg); break;
             case 'frame': updateFrame(msg); break;
             case 'success': handleSuccess(msg); break;
+            case 'clear_fill': clearPaintCanvas(); break;
             case 'error': alert(msg.message); break;
         }
     }
+
+    // Track the previous broadcast values so we can auto-clear the Fill
+    // paint canvas on the right transitions: mode changes (live ↔ accumulate)
+    // and round-index changes (a new round should start with a clean room).
+    let prevGameMode  = null;
+    let prevRoundIdx  = null;
+    let prevPhase     = null;
 
     function updateFromState(s) {
         gameMode = s.mode || 'live';
         experienceStage = s.experienceStage || 'dead-room';
         currentPhase = s.phase || currentPhase;
+
+        // Auto-clear the paint canvas on mode change OR new round start.
+        // Without this, paint from a previous Fill round would linger when
+        // the host re-picks a mode or starts a fresh round.
+        if (prevGameMode !== null && prevGameMode !== gameMode) clearPaintCanvas();
+        if (prevRoundIdx !== null && prevRoundIdx !== s.roundIndex) clearPaintCanvas();
+        if (prevPhase === 'lobby' && s.phase === 'playing') clearPaintCanvas();
+        prevGameMode = gameMode;
+        prevRoundIdx = s.roundIndex;
+        prevPhase    = s.phase;
+
+        // Populate the multi-device URL list in the host lobby. The server
+        // discovers all non-internal IPv4 addresses and ships them here.
+        // The host clicks "Start as Host" first so this only renders for
+        // a host tab in the lobby.
+        if (lobbyNetworkList && Array.isArray(s.serverIPs) && myRole === 'host') {
+            const port = s.serverPort || 8080;
+            if (s.serverIPs.length === 0) {
+                lobbyNetworkList.innerHTML =
+                    '<li class="lobby-network-empty">no local network address detected — use an HTTPS tunnel</li>';
+            } else {
+                lobbyNetworkList.innerHTML = s.serverIPs.map(ip => {
+                    const addr = ip.address || ip;          // tolerant of either shape
+                    const ifn  = ip.name ? ` <span class="lobby-network-iface">(${ip.name})</span>` : '';
+                    return `<li><code>http://${addr}:${port}</code>${ifn}</li>`;
+                }).join('');
+            }
+        }
         connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];
         playersInfo      = Array.isArray(s.players)          ? s.players          : [];
         // Mirror this client's assigned zone back into the local myZone +
@@ -961,6 +1075,16 @@
                 && experienceStage === 'dead-room'
                 && (s.phase === 'playing' || s.phase === 'success');
             btnBackToLobby.classList.toggle('hidden', !showBack);
+        }
+        // Host-only "Clear Fill" — only meaningful in Fill Mode, while a
+        // round is actually painting. Hidden in Live Mix where there's no
+        // accumulation to clear.
+        if (btnClearFill) {
+            const showClear = myRole === 'host'
+                && experienceStage === 'dead-room'
+                && gameMode === 'accumulate'
+                && (s.phase === 'playing' || s.phase === 'success');
+            btnClearFill.classList.toggle('hidden', !showClear);
         }
         // "No players connected" hint — only the host needs to see it, and
         // only when a round is actually trying to play with zero phones.
@@ -1211,28 +1335,28 @@
             sourcePositions[role] = getScreenPositionFromNormalised(s);
         }
 
-        // ---- Paint field (Fill Mode only) ----
-        // Stamp a soft low-alpha colour blob at each speaking role's
-        // current screen position. The slow trail fade in Fill Mode keeps
-        // these stamps visible for ~10 seconds, so a moving + speaking
-        // player visibly PAINTS the room along their movement path.
+        // ---- Paint canvas (Fill Mode memory layer) ----
+        // In Fill Mode: stamp each speaking source's colour onto the
+        // dedicated paint canvas. It persists across frames so movement
+        // leaves visible coloured paths.
+        // In Live Mix: don't stamp; instead, slowly erase any leftover
+        // paint from a previous Fill round so Live looks clean.
         if (mc.paintField) {
             for (const role of ROLES) {
                 const src = sourcePositions[role];
                 if (!src) continue;
                 const vol = Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
                 if (vol < CONFIG.volumeThresholdVisual) continue;
-                const color = COLORS[role];
-                const blobR = mc.paintFieldRadius + vol * 30;
-                const grad = ctx.createRadialGradient(src.x, src.y, 0, src.x, src.y, blobR);
-                grad.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${(mc.paintFieldAlpha * (0.5 + vol * 0.5)).toFixed(3)})`);
-                grad.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
-                ctx.fillStyle = grad;
-                ctx.beginPath();
-                ctx.arc(src.x, src.y, blobR, 0, Math.PI * 2);
-                ctx.fill();
+                stampPaint(src.x, src.y, COLORS[role], vol);
             }
+        } else {
+            // Soft destination-out to clear lingering paint over a few seconds.
+            fadePaintCanvas(0.04);
         }
+        // Blit the paint canvas onto the main canvas AFTER the main trail
+        // fade has already darkened the frame. The paint reads as a layer
+        // beneath the rings/particles drawn next.
+        ctx.drawImage(paintCanvas, 0, 0, window.innerWidth, window.innerHeight);
 
         // Per-role anchors + emitters. Each role is independent — a silent
         // role draws nothing (no faint cloud, no particles, no ring).
@@ -1258,7 +1382,9 @@
                 spawnSoundParticles(color, vol, src);
             }
 
-            if (isConnected) drawSourceLabel(src.x, src.y, color, true);
+            // Source labels (RED / GREEN / BLUE + status) are diagnostic
+            // only — keep the museum projection clean. Show in debug mode.
+            if (isConnected && debugVisible) drawSourceLabel(src.x, src.y, color, true);
         }
 
         // Update + draw the pulse rings and the active-particle list. Rings
@@ -1395,6 +1521,14 @@
     btnHudExit.addEventListener('click', exitToLanding);
     btnPlayerBack.addEventListener('click', exitToLanding);
     btnBackToLobby.addEventListener('click', () => send({ type: 'back_to_lobby' }));
+    // Clear Fill — clear locally for snappy feedback, then ask the server
+    // to broadcast a clear_fill event so every other projection clears too.
+    if (btnClearFill) {
+        btnClearFill.addEventListener('click', () => {
+            clearPaintCanvas();
+            send({ type: 'clear_fill' });
+        });
+    }
 
     // Museum walkthrough — stage transitions (host only; server enforces the role check too)
     btnAdvanceToThreshold.addEventListener('click', () => send({ type: 'set_stage', stage: 'threshold' }));
