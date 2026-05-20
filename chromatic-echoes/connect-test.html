@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  Chromatic Echoes — standalone connection diagnostic page.
+
+  Loaded at /connect-test. Self-contained: no external scripts, no
+  dependency on app.js / style.css / index.html. If app.js has a bug
+  that breaks the main page, this page still loads and tells you whether
+  the phone can reach HTTP, the WebSocket, and the microphone.
+
+  Three checks:
+    A. HTTP — implicit (you wouldn't see this page otherwise)
+    B. WebSocket — auto-connect + manual ping/pong button
+    C. Microphone — manual getUserMedia probe with explicit error readout
+-->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>Connection Test · Chromatic Echoes</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg:     #0d0e12;
+            --panel:  #16181f;
+            --border: #2a2e38;
+            --text:   #e6e6ea;
+            --dim:    #9094a4;
+            --ok:     #5ee08d;
+            --warn:   #ffc452;
+            --bad:    #ff6066;
+            --accent: #7aa8ff;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 24px 18px 60px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            margin: 0 0 4px;
+        }
+        .sub {
+            color: var(--dim);
+            font-size: 0.85rem;
+            margin: 0 0 24px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin: 0 0 14px;
+        }
+        .label {
+            font-size: 0.72rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--dim);
+            margin: 0 0 6px;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 5px 0;
+            font-size: 0.92rem;
+        }
+        .row > span:first-child { color: var(--dim); }
+        .pill {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+        }
+        .pill.ok    { background: rgba(94,224,141,0.15); color: var(--ok); border: 1px solid rgba(94,224,141,0.4); }
+        .pill.warn  { background: rgba(255,196,82,0.15); color: var(--warn); border: 1px solid rgba(255,196,82,0.4); }
+        .pill.bad   { background: rgba(255,96,102,0.15); color: var(--bad); border: 1px solid rgba(255,96,102,0.4); }
+        .pill.dim   { background: rgba(144,148,164,0.10); color: var(--dim); border: 1px solid var(--border); }
+        button {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 9px 16px;
+            font-size: 0.92rem;
+            border-radius: 9px;
+            cursor: pointer;
+            font-family: inherit;
+            margin: 8px 0 0;
+            min-width: 160px;
+        }
+        button:hover { border-color: var(--accent); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        code {
+            font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+            font-size: 0.85rem;
+            background: rgba(255,255,255,0.05);
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
+        .result {
+            font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+            font-size: 0.78rem;
+            color: var(--dim);
+            background: rgba(0,0,0,0.25);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin: 8px 0 0;
+            min-height: 32px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .footer {
+            color: var(--dim);
+            font-size: 0.78rem;
+            margin-top: 24px;
+            text-align: center;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <h1>Chromatic Echoes — connection test</h1>
+    <p class="sub">Run this on the phone you want to use in the demo. Three checks below.</p>
+
+    <!-- A. HTTP -->
+    <div class="panel" id="httpPanel">
+        <p class="label">A · HTTP reach</p>
+        <div class="row">
+            <span>page reached this device</span>
+            <span class="pill ok">connected</span>
+        </div>
+        <div class="row"><span>page URL</span><span id="pageUrl">—</span></div>
+        <div class="row"><span>protocol</span><span id="pageProto">—</span></div>
+        <div class="row"><span>server says</span><span id="healthStatus" class="pill dim">checking…</span></div>
+        <div class="result" id="healthResult">/health → fetching…</div>
+    </div>
+
+    <!-- B. WebSocket -->
+    <div class="panel" id="wsPanel">
+        <p class="label">B · WebSocket</p>
+        <div class="row">
+            <span>connection</span>
+            <span id="wsStatus" class="pill dim">connecting…</span>
+        </div>
+        <div class="row"><span>endpoint</span><span id="wsEndpoint">—</span></div>
+        <button id="pingBtn" disabled>Send ping</button>
+        <div class="result" id="wsResult">waiting…</div>
+    </div>
+
+    <!-- C. Microphone -->
+    <div class="panel" id="micPanel">
+        <p class="label">C · Microphone</p>
+        <div class="row">
+            <span>state</span>
+            <span id="micStatus" class="pill dim">not tested</span>
+        </div>
+        <button id="micBtn">Test microphone</button>
+        <div class="result" id="micResult">tap the button above to test getUserMedia</div>
+    </div>
+
+    <p class="footer">
+        Main app: <a href="/">/</a> · Health JSON: <a href="/health" target="_blank">/health</a>
+    </p>
+
+<script>
+(function () {
+    'use strict';
+    // ---- A. HTTP / health ----
+    document.getElementById('pageUrl').textContent   = location.href;
+    document.getElementById('pageProto').textContent = location.protocol;
+    const healthStatusEl = document.getElementById('healthStatus');
+    const healthResultEl = document.getElementById('healthResult');
+    fetch('/health', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(data => {
+            healthStatusEl.className = 'pill ok';
+            healthStatusEl.textContent = 'ok';
+            healthResultEl.textContent =
+                'recommendedURL: ' + (data.recommendedURL || '(none — no real LAN adapter)') + '\n' +
+                'serverIPs: ' + (data.serverIPs || []).map(ip =>
+                    (ip.recommended ? '★ ' : '  ') + ip.address + '  (' + ip.name + ')' +
+                    (ip.isVirtual ? '  [virtual]' : '')
+                ).join('\n          ') + '\n' +
+                'time: ' + data.timestamp;
+        })
+        .catch(err => {
+            healthStatusEl.className = 'pill bad';
+            healthStatusEl.textContent = 'unreachable';
+            healthResultEl.textContent = 'fetch failed: ' + (err && err.message ? err.message : err);
+        });
+
+    // ---- B. WebSocket ----
+    const wsStatusEl   = document.getElementById('wsStatus');
+    const wsEndpointEl = document.getElementById('wsEndpoint');
+    const wsResultEl   = document.getElementById('wsResult');
+    const pingBtn      = document.getElementById('pingBtn');
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = wsProto + '//' + location.host;
+    wsEndpointEl.textContent = wsUrl;
+    let ws = null;
+    let pendingPingAt = 0;
+    function setWsStatus(text, cls) { wsStatusEl.textContent = text; wsStatusEl.className = 'pill ' + cls; }
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (e) {
+        setWsStatus('error', 'bad');
+        wsResultEl.textContent = 'WebSocket constructor threw: ' + (e && e.message ? e.message : e);
+    }
+    if (ws) {
+        ws.addEventListener('open',  () => { setWsStatus('open', 'ok'); pingBtn.disabled = false; wsResultEl.textContent = 'WebSocket open. Press "Send ping" to verify round-trip.'; });
+        ws.addEventListener('close', (e) => { setWsStatus('closed', 'warn'); pingBtn.disabled = true; wsResultEl.textContent = 'WebSocket closed (code ' + e.code + ').'; });
+        ws.addEventListener('error', () => { setWsStatus('error', 'bad'); wsResultEl.textContent = 'WebSocket error. If HTTP works but this fails, an intermediate proxy or HTTPS-tunnel may be stripping ws://.'; });
+        ws.addEventListener('message', (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'pong') {
+                    const rtt = pendingPingAt ? (Date.now() - pendingPingAt) : null;
+                    wsResultEl.textContent = 'pong received' + (rtt != null ? ' — round-trip ' + rtt + ' ms' : '');
+                    pendingPingAt = 0;
+                }
+            } catch (_) {}
+        });
+    }
+    pingBtn.addEventListener('click', () => {
+        if (!ws || ws.readyState !== 1) return;
+        pendingPingAt = Date.now();
+        wsResultEl.textContent = 'ping sent…';
+        ws.send(JSON.stringify({ type: 'ping', sent: pendingPingAt }));
+        setTimeout(() => {
+            if (pendingPingAt) {
+                wsResultEl.textContent = 'no pong within 3 s — server may be unresponsive.';
+                pendingPingAt = 0;
+            }
+        }, 3000);
+    });
+
+    // ---- C. Microphone ----
+    const micStatusEl = document.getElementById('micStatus');
+    const micResultEl = document.getElementById('micResult');
+    const micBtn      = document.getElementById('micBtn');
+    micBtn.addEventListener('click', async () => {
+        micBtn.disabled = true;
+        micStatusEl.className = 'pill dim'; micStatusEl.textContent = 'requesting…';
+        micResultEl.textContent = 'calling navigator.mediaDevices.getUserMedia({audio:true}) …';
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('navigator.mediaDevices.getUserMedia is unavailable. Older browser or non-secure context.');
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStatusEl.className = 'pill ok'; micStatusEl.textContent = 'granted';
+            const tracks = stream.getAudioTracks();
+            micResultEl.textContent =
+                'Permission granted. ' + tracks.length + ' audio track(s).\n' +
+                tracks.map(t => '• ' + (t.label || '(no label)') + '  enabled=' + t.enabled + '  state=' + t.readyState).join('\n');
+            // Be polite — release the mic as soon as we've confirmed.
+            tracks.forEach(t => t.stop());
+        } catch (err) {
+            micStatusEl.className = 'pill bad'; micStatusEl.textContent = 'failed';
+            const isHttp = location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+            micResultEl.textContent =
+                (err && err.name ? err.name : 'Error') + ': ' + (err && err.message ? err.message : String(err)) + '\n\n' +
+                (isHttp
+                    ? 'This page is on HTTP from a LAN address. Mobile browsers require HTTPS (or localhost) for microphone access.\n' +
+                      'Run an HTTPS tunnel on the host laptop:\n' +
+                      '  cloudflared tunnel --url http://localhost:8080\n' +
+                      '  ngrok http 8080\n' +
+                      'and open the printed https:// URL on this phone instead.'
+                    : 'If you accidentally denied the prompt, tap the address-bar permission icon and re-allow Microphone, then refresh.');
+        } finally {
+            micBtn.disabled = false;
+        }
+    });
+})();
+</script>
+</body>
+</html>

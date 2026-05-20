@@ -46,6 +46,9 @@
     const btnBackToLanding = document.getElementById('btnBackToLanding');
     const lobbyUrl = document.getElementById('lobbyUrl');
     const lobbyNetworkList = document.getElementById('lobbyNetworkList');
+    const lobbyRecommendedUrl  = document.getElementById('lobbyRecommendedUrl');
+    const lobbyHealthLink      = document.getElementById('lobbyHealthLink');
+    const lobbyConnectTestLink = document.getElementById('lobbyConnectTestLink');
     const btnStartRound = document.getElementById('btnStartRound');
     const modeBtns = document.querySelectorAll('.mode-btn');
     const lobbySlots = {
@@ -925,21 +928,36 @@
         prevRoundIdx = s.roundIndex;
         prevPhase    = s.phase;
 
-        // Populate the multi-device URL list in the host lobby. The server
-        // discovers all non-internal IPv4 addresses and ships them here.
-        // The host clicks "Start as Host" first so this only renders for
-        // a host tab in the lobby.
-        if (lobbyNetworkList && Array.isArray(s.serverIPs) && myRole === 'host') {
+        // Host lobby: show the server-picked Recommended URL in big text,
+        // and list the other detected addresses underneath with markers
+        // (virtual / secondary). Recommended URL also drives the /health
+        // and /connect-test diagnostic links so a host can copy any of
+        // them straight onto a phone.
+        if (myRole === 'host') {
             const port = s.serverPort || 8080;
-            if (s.serverIPs.length === 0) {
-                lobbyNetworkList.innerHTML =
-                    '<li class="lobby-network-empty">no local network address detected — use an HTTPS tunnel</li>';
-            } else {
-                lobbyNetworkList.innerHTML = s.serverIPs.map(ip => {
-                    const addr = ip.address || ip;          // tolerant of either shape
-                    const ifn  = ip.name ? ` <span class="lobby-network-iface">(${ip.name})</span>` : '';
-                    return `<li><code>http://${addr}:${port}</code>${ifn}</li>`;
-                }).join('');
+            const recURL = s.recommendedURL || null;
+            if (lobbyRecommendedUrl) {
+                lobbyRecommendedUrl.textContent = recURL
+                    || 'no LAN address — use an HTTPS tunnel (see below)';
+                lobbyRecommendedUrl.classList.toggle('lobby-recommended-url--missing', !recURL);
+            }
+            if (lobbyHealthLink && recURL)      lobbyHealthLink.href      = recURL + '/health';
+            if (lobbyConnectTestLink && recURL) lobbyConnectTestLink.href = recURL + '/connect-test';
+
+            if (lobbyNetworkList && Array.isArray(s.serverIPs)) {
+                const others = s.serverIPs.filter(ip => !ip.recommended);
+                if (others.length === 0) {
+                    lobbyNetworkList.innerHTML =
+                        '<li class="lobby-network-empty">no other addresses detected</li>';
+                } else {
+                    lobbyNetworkList.innerHTML = others.map(ip => {
+                        const tag = ip.isVirtual
+                            ? '<span class="lobby-network-tag lobby-network-tag--virtual">virtual / host-only</span>'
+                            : '<span class="lobby-network-tag lobby-network-tag--secondary">secondary</span>';
+                        return `<li><code>http://${ip.address}:${port}</code>` +
+                               ` <span class="lobby-network-iface">(${ip.name})</span> ${tag}</li>`;
+                    }).join('');
+                }
             }
         }
         connectedPlayers = Array.isArray(s.connectedPlayers) ? s.connectedPlayers : [];

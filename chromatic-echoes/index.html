@@ -150,18 +150,59 @@
             <h2 class="screen-title">Waiting for Players</h2>
             <p class="screen-subtitle">Share the URL with your teammates</p>
             <!-- Phone-reachable URLs + multi-device testing notes. Filled
-                 in from server-broadcast serverIPs after Host joins. -->
+                 in from server-broadcast serverIPs / recommendedURL after
+                 the host joins. -->
             <div id="lobbyUrl" class="lobby-url"></div>
             <div id="lobbyNetworkInfo" class="lobby-network-info">
-                <p class="lobby-network-title">Phones on the same Wi-Fi as this computer can open:</p>
-                <ul id="lobbyNetworkList" class="lobby-network-list">
-                    <li class="lobby-network-empty">discovering local addresses…</li>
-                </ul>
-                <p class="lobby-network-hint">
-                    If a phone's microphone permission dialog never appears,
-                    most mobile browsers require an HTTPS URL. Run an HTTPS
-                    tunnel (e.g. <code>cloudflared tunnel --url http://localhost:8080</code>
-                    or <code>ngrok http 8080</code>) and share that URL instead.
+                <!-- Recommended URL (hero) -->
+                <div id="lobbyRecommended" class="lobby-recommended">
+                    <p class="lobby-recommended-label">Recommended phone URL</p>
+                    <code id="lobbyRecommendedUrl" class="lobby-recommended-url">discovering local network…</code>
+                </div>
+
+                <!-- 3-step join instructions for non-technical visitors -->
+                <ol class="lobby-steps">
+                    <li>Connect the phone to <em>the same Wi-Fi or hotspot as this laptop</em>.</li>
+                    <li>Open the URL above in <em>Safari</em> (iPhone) or <em>Chrome</em> (Android).</li>
+                    <li>Allow microphone permission when the browser asks.</li>
+                </ol>
+                <p class="lobby-warn">
+                    Do not use <code>localhost</code> on a phone — <code>localhost</code> only
+                    refers to the phone itself, not this laptop.
+                </p>
+
+                <!-- Other addresses (collapsed below the main URL) -->
+                <details class="lobby-other-ips">
+                    <summary>Other detected addresses</summary>
+                    <ul id="lobbyNetworkList" class="lobby-network-list">
+                        <li class="lobby-network-empty">discovering local addresses…</li>
+                    </ul>
+                </details>
+
+                <!-- Troubleshooting -->
+                <details class="lobby-troubleshoot">
+                    <summary>If a phone can't reach the URL</summary>
+                    <ul>
+                        <li>Check the phone is on the same Wi-Fi / hotspot as this laptop.</li>
+                        <li>Use the recommended URL above, not a VirtualBox / vEthernet / Bluetooth address.</li>
+                        <li>Windows Firewall may need to allow Node.js on <em>Private</em> networks.</li>
+                        <li>Disable any VPN temporarily.</li>
+                        <li>If still stuck, switch to a phone hotspot (more permissive than corporate Wi-Fi).</li>
+                    </ul>
+                </details>
+                <details class="lobby-troubleshoot">
+                    <summary>If the page opens but the microphone doesn't work</summary>
+                    <p>Mobile browsers require an <em>HTTPS</em> URL for microphone access. Run an
+                    HTTPS tunnel on this laptop and share the resulting <code>https://…</code> URL:</p>
+                    <pre><code>cloudflared tunnel --url http://localhost:8080
+ngrok http 8080</code></pre>
+                </details>
+
+                <p class="lobby-diag">
+                    Quick diagnostics on a phone:
+                    <a id="lobbyHealthLink"      href="/health" target="_blank">/health</a>
+                    ·
+                    <a id="lobbyConnectTestLink" href="/connect-test" target="_blank">/connect-test</a>
                 </p>
             </div>
 

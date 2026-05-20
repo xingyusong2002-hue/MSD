@@ -117,3 +117,64 @@ current mix to every client. Each phone's render loop reads its own microphone, 
 RMS volume, and sends a `volume` message back. The host page receives the same frames
 and renders the projection canvas. There is no database, no auth, no rooms — one server
 process = one game.
+
+---
+
+## Multi-device testing (phones + host laptop)
+
+The host laptop runs `npm start`. Phones connect to it over Wi-Fi or a phone
+hotspot. **Phones cannot use `localhost`** — that points at the phone itself.
+The host lobby displays the recommended URL for phones after the host joins;
+the server boot banner also prints it.
+
+### Pick the right URL
+
+A laptop typically reports several IPv4 addresses (Wi-Fi, ethernet,
+VirtualBox, Hyper-V, vEthernet, etc). The server now ranks them and the
+lobby shows a single **Recommended phone URL**. Use that one. Virtual
+adapters (e.g. `192.168.56.x` from VirtualBox) are filtered out.
+
+### Diagnostic endpoints
+
+On any phone you want to test, open these *before* the main app:
+
+| Endpoint | What it proves |
+|---|---|
+| `http://<recommended-url>/health` | A reachable JSON response → HTTP works between phone and laptop. Returns the server's view of available IPs and the recommended URL. |
+| `http://<recommended-url>/connect-test` | A standalone page that runs three checks: HTTP reach, WebSocket open + ping-pong, and `getUserMedia` with the real error name/message. |
+
+If `/health` fails, the issue is **network / firewall / IP**, not the app.
+
+### Phones can't reach the URL
+
+In rough order of likelihood:
+
+1. **Wrong network.** Phone is on cellular or a different Wi-Fi than the laptop. Connect both to the same hotspot.
+2. **Wrong IP.** A virtual adapter (VirtualBox 192.168.56.x, Hyper-V, vEthernet, Bluetooth PAN) was shared instead of the Wi-Fi one. The lobby filters these; if you copied a URL manually, double-check.
+3. **Windows Firewall.** Node.js must be allowed on *Private* networks. First boot triggers the Windows Defender Firewall prompt — accept it. If you missed it, run `wf.msc` and find Node.js in Inbound Rules.
+4. **Corporate or guest Wi-Fi with client isolation.** Many guest networks block device-to-device traffic. Switch to a phone hotspot.
+5. **VPN on the laptop.** Disable it temporarily; VPNs commonly intercept LAN traffic.
+
+### Phone reaches the URL but the microphone doesn't work
+
+Mobile browsers refuse `getUserMedia` over plain `http://` from a LAN address
+— they require **HTTPS** or `localhost`. Two options:
+
+- **HTTPS tunnel (easiest):** in a separate terminal,
+  ```
+  cloudflared tunnel --url http://localhost:8080
+  # or
+  ngrok http 8080
+  ```
+  Share the printed `https://...` URL with phones instead of the LAN URL.
+- **Per-device flag (Chrome only, test machines only):** in `chrome://flags`,
+  enable *"Insecure origins treated as secure"* and add `http://<your-ip>:8080`.
+  This is for rehearsal devices, not public phones.
+
+### Testing all four roles from one laptop
+
+Each browser tab is one client. Multi-window testing is documented earlier
+in this README. The recommended-URL lookup also works on the host laptop
+itself — open `http://localhost:8080` for the host, and additional tabs
+opened as Join Game on the same laptop will see and respond to mic input
+from the laptop microphone.

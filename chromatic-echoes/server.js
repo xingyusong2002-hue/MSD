@@ -248,15 +248,54 @@ function broadcastState() {
         // host with multiple adapters can identify the right one.
         serverIPs: getLocalIPs(),
         serverPort: PORT,
+        recommendedURL: getRecommendedURL(),
     });
 }
 
 // ---- HTTP Server ----
 const server = http.createServer((req, res) => {
-    let filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
+    // Strip query string so /health?foo=bar still matches /health.
+    const rawUrl = req.url || '/';
+    const pathOnly = rawUrl.split('?', 1)[0];
+
+    // /health — small JSON document phones can hit BEFORE loading the main
+    // app, to verify "is this URL even reachable from my phone?". Same
+    // payload as the lobby uses, plus a timestamp for clock-sanity.
+    if (pathOnly === '/health') {
+        const body = JSON.stringify({
+            ok: true,
+            app: 'chromatic-echoes',
+            port: PORT,
+            recommendedURL: getRecommendedURL(),
+            serverIPs: getLocalIPs(),
+            timestamp: new Date().toISOString(),
+        }, null, 2);
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*',  // so phones can fetch from anywhere
+        });
+        res.end(body);
+        return;
+    }
+
+    // /connect-test — standalone diagnostic page. Tests HTTP+WS+mic in
+    // isolation, doesn't share code with the main app so it boots even
+    // when the main app has a bug.
+    if (pathOnly === '/connect-test' || pathOnly === '/connect-test/') {
+        const filePath = path.join(__dirname, 'connect-test.html');
+        fs.readFile(filePath, (err, data) => {
+            if (err) { res.writeHead(404); res.end('connect-test.html missing'); return; }
+            res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+            res.end(data);
+        });
+        return;
+    }
+
+    // Default: static file serving (unchanged).
+    let filePath = path.join(__dirname, pathOnly === '/' ? 'index.html' : pathOnly);
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME[ext] || 'application/octet-stream';
-
     fs.readFile(filePath, (err, data) => {
         if (err) {
             res.writeHead(404);
@@ -490,6 +529,20 @@ wss.on('connection', (ws) => {
                 break;
             }
 
+            case 'ping': {
+                // Used by /connect-test to verify the WebSocket is bidirectional.
+                // Echoes a pong with the original timestamp so the page can show
+                // round-trip latency without any extra state.
+                try {
+                    ws.send(JSON.stringify({
+                        type: 'pong',
+                        sent: msg.sent || null,
+                        receivedAt: Date.now(),
+                    }));
+                } catch (e) { /* socket dead, ignore */ }
+                break;
+            }
+
             case 'clear_fill': {
                 // Host clears the Fill Mode paint canvas on every connected
                 // projection. No game-state change — just a fan-out event
@@ -669,14 +722,36 @@ wss.on('connection', (ws) => {
         // the LAN URLs immediately, before any subsequent broadcast.
         serverIPs: getLocalIPs(),
         serverPort: PORT,
+        recommendedURL: getRecommendedURL(),
     }));
 });
 
 // ---- Start ----
 server.listen(PORT, HOST, () => {
-    console.log(`\n🎨 Chromatic Echoes Server`);
-    console.log(`   Local:   http://localhost:${PORT}`);
-    console.log(`   Network: http://${getLocalIP()}:${PORT}\n`);
+    const ips = getLocalIPs();
+    const recommended = getRecommendedURL();
+    console.log(`\nChromatic Echoes Server  —  listening on port ${PORT}\n`);
+    console.log(`Host laptop:`);
+    console.log(`  http://localhost:${PORT}\n`);
+    if (recommended) {
+        console.log(`Recommended phone URL (share this with phones on the same Wi-Fi/hotspot):`);
+        console.log(`  ${recommended}\n`);
+        console.log(`Health check:        ${recommended}/health`);
+        console.log(`Connection test:     ${recommended}/connect-test\n`);
+    } else {
+        console.log(`(no real LAN adapter detected — only virtual / host-only interfaces.`);
+        console.log(` Phones won't reach this server on the current network. Connect to a`);
+        console.log(` real Wi-Fi or phone hotspot, or use an HTTPS tunnel.)\n`);
+    }
+    const others = ips.filter(ip => !ip.recommended);
+    if (others.length > 0) {
+        console.log(`Other detected IPs (not recommended):`);
+        for (const ip of others) {
+            const tag = ip.isVirtual ? '[virtual]' : '[secondary]';
+            console.log(`  http://${ip.address}:${PORT}  (${ip.name})  ${tag}  — why: ${ip.why}`);
+        }
+        console.log('');
+    }
 });
 
 function getLocalIP() {
@@ -691,10 +766,75 @@ function getLocalIP() {
     return 'localhost';
 }
 
-// Return ALL non-internal IPv4 addresses (a laptop often has more than one
-// — Wi-Fi, ethernet, virtual adapters). The host lobby shows each as a
-// URL phones can try; the visitor picks whichever matches their network.
-// Cached because os.networkInterfaces() is occasionally expensive on Windows.
+// Return all non-internal IPv4 addresses, scored by how likely each is to
+// be a "real" LAN address a phone can reach. The host lobby and the boot
+// banner both highlight the highest-scoring one as the recommended URL.
+//
+// Why scoring rather than picking-the-first or returning all-unsorted:
+// laptops on Windows commonly show a "VirtualBox Host-Only" 192.168.56.x
+// adapter that looks like a normal LAN IP but is unreachable from phones.
+// We rank by interface NAME (most reliable), MAC prefix (OUI lookup —
+// VirtualBox 08:00:27, VMware 00:50:56, Hyper-V 00:15:5D), and a small
+// set of well-known virtual IP prefixes. Wireless adapter names get a
+// strong positive score so a real Wi-Fi / hotspot connection wins.
+const VIRTUAL_NAME_PATTERNS = [
+    /virtualbox/i, /vmware/i, /hyper-?v/i, /vethernet/i, /bluetooth/i,
+    /host-?only/i, /pseudo/i, /\btap[\s_-]?\d*\b/i, /\btun[\s_-]?\d*\b/i,
+    /docker/i, /wsl/i, /loopback/i, /tunnel/i, /zerotier/i, /tailscale/i,
+    /openvpn/i, /utun/i,
+];
+const WIRELESS_NAME_PATTERNS = [
+    /wlan/i, /wi-?fi/i, /wireless/i, /\bairport\b/i, /\bwl\w*\b/i,
+];
+const WIRED_NAME_PATTERNS = [
+    /^ethernet$/i, /^eth\d*$/i, /^en\d+$/i, /lan adapter/i, /local area connection$/i,
+];
+const VIRTUAL_MAC_PREFIXES = [
+    '00:50:56', '00:0c:29', '00:05:69',  // VMware
+    '08:00:27',                            // VirtualBox
+    '00:15:5d',                            // Hyper-V
+    '00:1c:42',                            // Parallels
+    '02:42',                               // Docker bridge (locally administered)
+];
+const VIRTUAL_IP_PREFIXES = [
+    '192.168.56.',   // VirtualBox host-only default
+    '192.168.99.',   // Docker Machine default
+    '169.254.',      // APIPA / link-local
+    '172.17.',       // Docker bridge default
+    '172.18.', '172.19.',
+];
+
+function scoreInterface(name, addr, mac) {
+    let score = 0;
+    let isVirtual = false;
+    let reason = [];
+    // Name signals — most reliable, OS tells us what the adapter is.
+    for (const re of VIRTUAL_NAME_PATTERNS) {
+        if (re.test(name)) { isVirtual = true; reason.push('virtual name'); break; }
+    }
+    for (const re of WIRELESS_NAME_PATTERNS) {
+        if (re.test(name)) { score += 100; reason.push('wireless name'); break; }
+    }
+    for (const re of WIRED_NAME_PATTERNS) {
+        if (re.test(name)) { score += 40; reason.push('wired name'); break; }
+    }
+    // MAC OUI signals — VirtualBox / VMware / Hyper-V are dead giveaways.
+    if (mac) {
+        const macLow = mac.toLowerCase();
+        for (const p of VIRTUAL_MAC_PREFIXES) {
+            if (macLow.startsWith(p.toLowerCase())) { isVirtual = true; reason.push('virtual mac'); break; }
+        }
+    }
+    // IP-range signals — last resort, only well-known virtual prefixes.
+    if (addr) {
+        for (const p of VIRTUAL_IP_PREFIXES) {
+            if (addr.startsWith(p)) { isVirtual = true; reason.push('virtual ip'); break; }
+        }
+    }
+    if (isVirtual) score = -1000;
+    return { score, isVirtual, reason: reason.join(', ') };
+}
+
 let cachedLocalIPs = null;
 let cachedLocalIPsAt = 0;
 function getLocalIPs() {
@@ -704,12 +844,35 @@ function getLocalIPs() {
     const nets = require('os').networkInterfaces();
     for (const name of Object.keys(nets)) {
         for (const net of nets[name]) {
-            if (net.family === 'IPv4' && !net.internal) {
-                out.push({ name, address: net.address });
-            }
+            if (net.family !== 'IPv4' || net.internal) continue;
+            const s = scoreInterface(name, net.address, net.mac);
+            out.push({
+                name,
+                address: net.address,
+                mac: net.mac || '',
+                score: s.score,
+                isVirtual: s.isVirtual,
+                why: s.reason || 'no strong signal',
+                recommended: false,
+            });
         }
+    }
+    out.sort((a, b) => b.score - a.score);
+    // Mark the top entry as recommended ONLY if it scored as a real network.
+    // If everything looks virtual, don't recommend anything (let the host fall
+    // back to HTTPS tunnel or fix their network).
+    if (out.length > 0 && out[0].score > 0 && !out[0].isVirtual) {
+        out[0].recommended = true;
     }
     cachedLocalIPs = out;
     cachedLocalIPsAt = now;
     return out;
+}
+
+// Convenience: the single best "share this with phones" URL, or null if no
+// real network adapter is available right now.
+function getRecommendedURL() {
+    const ips = getLocalIPs();
+    const top = ips.find(ip => ip.recommended);
+    return top ? `http://${top.address}:${PORT}` : null;
 }

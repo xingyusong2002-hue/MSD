@@ -485,9 +485,159 @@ body {
 /* Multi-device testing block — shown to the host in the lobby. */
 .lobby-network-info {
     margin: 0 auto 1.6em;
-    max-width: 520px;
+    max-width: 560px;
     text-align: left;
     color: var(--c-text-dim);
+}
+
+/* Recommended URL hero — the single URL phones should use. */
+.lobby-recommended {
+    background: linear-gradient(
+        135deg,
+        oklch(48% 0.10 240 / 0.20),
+        oklch(48% 0.10 240 / 0.08));
+    border: 1px solid oklch(70% 0.14 240 / 0.40);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 0 0 1em;
+    text-align: center;
+}
+.lobby-recommended-label {
+    font-family: var(--font-body);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: oklch(80% 0.04 240);
+    margin: 0 0 0.5em;
+}
+.lobby-recommended-url {
+    display: block;
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 1.05rem;
+    color: oklch(96% 0.02 240);
+    background: transparent;
+    padding: 0;
+    word-break: break-all;
+}
+.lobby-recommended-url--missing {
+    font-size: 0.82rem;
+    font-family: var(--font-body);
+    color: oklch(75% 0.14 60);    /* warm amber for the "no LAN" case */
+}
+
+.lobby-steps {
+    margin: 0 0 1em;
+    padding: 0 0 0 1.4em;
+    font-family: var(--font-body);
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: var(--c-text);
+}
+.lobby-steps li { margin-bottom: 0.3em; }
+.lobby-steps em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--c-text);
+}
+
+.lobby-warn {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    color: oklch(85% 0.14 60);
+    background: oklch(50% 0.14 60 / 0.10);
+    border: 1px solid oklch(60% 0.14 60 / 0.30);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 0 0 1.2em;
+}
+.lobby-warn code {
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 0.78rem;
+    color: var(--c-text);
+    background: oklch(100% 0 0 / 0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.lobby-other-ips, .lobby-troubleshoot {
+    margin: 0 0 0.6em;
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    color: var(--c-text-dim);
+}
+.lobby-other-ips summary,
+.lobby-troubleshoot summary {
+    cursor: pointer;
+    padding: 8px 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--c-text);
+    list-style: none;
+    user-select: none;
+}
+.lobby-other-ips summary::after,
+.lobby-troubleshoot summary::after {
+    content: ' ▾';
+    color: var(--c-text-dim);
+    font-size: 0.7em;
+}
+.lobby-other-ips[open] summary::after,
+.lobby-troubleshoot[open] summary::after {
+    content: ' ▴';
+}
+.lobby-other-ips > ul,
+.lobby-troubleshoot > ul {
+    margin: 0.6em 0 0;
+    padding: 0 0 0 1.4em;
+    color: var(--c-text-dim);
+}
+.lobby-troubleshoot p,
+.lobby-troubleshoot pre {
+    margin: 0.6em 0;
+    color: var(--c-text-dim);
+}
+.lobby-troubleshoot pre {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    font-family: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 0.78rem;
+    color: var(--c-text);
+}
+
+.lobby-network-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    margin-left: 8px;
+    font-family: var(--font-body);
+}
+.lobby-network-tag--virtual {
+    color: oklch(75% 0.14 60);
+    border: 1px solid oklch(60% 0.14 60 / 0.35);
+    background: oklch(50% 0.14 60 / 0.10);
+}
+.lobby-network-tag--secondary {
+    color: var(--c-text-dim);
+    border: 1px solid var(--glass-border);
+    background: oklch(100% 0 0 / 0.04);
+}
+
+.lobby-diag {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    color: var(--c-text-dim);
+    margin: 1em 0 0;
+}
+.lobby-diag a {
+    color: oklch(78% 0.12 240);
+    text-decoration: none;
+    border-bottom: 1px dashed oklch(78% 0.12 240 / 0.4);
 }
 .lobby-network-title {
     font-family: var(--font-body);
