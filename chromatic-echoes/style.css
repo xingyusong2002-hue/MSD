@@ -25,7 +25,7 @@
     /* OKLCH palette (see DESIGN.md). Perceptually uniform; tweak L without
        changing perceived hue. Falls back to nothing on browsers < 2022, which
        we don't need to support for this MVP. */
-    --c-bg:        oklch(11% 0.012 60);        /* deep warm near-black */
+    --c-bg:        oklch(9% 0.020 45);         /* deep warm brown — matches canvas trail */
     --c-surface:   oklch(100% 0 0 / 0.04);     /* faint glass */
     --c-surface-h: oklch(100% 0 0 / 0.08);     /* hover */
     --c-text:      oklch(96% 0.01 60);         /* warm off-white */
@@ -1480,17 +1480,37 @@ body {
     font-weight: 500;
 }
 
-/* Secondary + tertiary screen-back buttons drop to row 2 of the HUD so
-   they never compete for the same row as the primary. Row 1 stays a
-   clean indicator strip; row 2 carries the host's transient controls. */
-.screen-back--secondary {
-    top: 62px;            /* row 2 — Back to lobby ↺ */
+/* In-HUD host control cluster — robust flex container so the three
+   buttons (Exit / Back to lobby / Clear Fill) auto-space and wrap
+   gracefully no matter how their labels change. The previous absolute-
+   offset approach collided whenever a label widened (e.g. icon font
+   metrics). */
+.hud-host-cluster {
+    position: absolute;
+    top: 62px;            /* row 2 of the top HUD */
     left: 14px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    max-width: calc(100vw - 480px);  /* don't overrun stage-toolbar on row 2 right */
+    pointer-events: none;             /* let the canvas receive drags through gaps */
 }
-.screen-back--tertiary {
-    top: 62px;            /* row 2 — Clear Fill, next to secondary */
-    left: 158px;
+.hud-host-btn {
+    position: static;     /* override .screen-back's absolute positioning */
+    top: auto;
+    left: auto;
+    padding: 8px 18px;
+    font-size: 0.85rem;
+    flex: 0 0 auto;
+    pointer-events: auto;
 }
+/* Legacy positions kept for any code path that still applies these
+   classes elsewhere — harmless inside the cluster because .hud-host-btn
+   already resets position:static. */
+.screen-back--secondary,
+.screen-back--tertiary { /* no-op — see .hud-host-btn */ }
 
 /* ---- Connection-status indicator ----
    Top-right pill. Three states: connecting (amber dot), open (green), closed
@@ -1585,8 +1605,96 @@ body {
     /* And drop the stage-toolbar to row 3 since the instruction sits
        below row 1 now. Host-only anyway; players won't see this. */
     .stage-toolbar { top: 100px; }
-    .screen-back--secondary,
-    .screen-back--tertiary { top: 100px; }
+}
+
+/* ============================================================
+   Quiet side-screen composition (host-only, dead-room-only)
+   ------------------------------------------------------------
+   The central room is the focus; the side areas were empty black
+   void. These two panels are intentionally low-contrast supporting
+   zones — like exhibit labels on either side of an installation.
+   Hidden below 1100px (where they'd start crowding the room) and
+   on any non-host tab.
+   ============================================================ */
+.hud-side {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 200px;
+    z-index: 5;
+    pointer-events: none;
+    font-family: var(--font-body);
+    opacity: 0.85;
+}
+.hud-side--left {
+    left: 30px;
+    text-align: left;
+}
+.hud-side--right {
+    right: 30px;
+    text-align: right;
+}
+.hud-side-section {
+    margin-bottom: 28px;
+}
+.hud-side-section:last-child {
+    margin-bottom: 0;
+}
+.hud-side-label {
+    font-size: 0.60rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: oklch(58% 0.020 50);
+    margin: 0 0 8px;
+    font-weight: 500;
+}
+.hud-side-title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    color: oklch(82% 0.020 55);
+    letter-spacing: 0.05em;
+    margin: 0 0 4px;
+    font-weight: 400;
+}
+.hud-side-text {
+    font-size: 0.74rem;
+    line-height: 1.55;
+    color: oklch(68% 0.015 55);
+    margin: 0;
+}
+.hud-side-players {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.hud-side--left .hud-side-players { align-items: flex-start; }
+.hud-side--right .hud-side-players { align-items: flex-end; }
+.hud-side-player {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: oklch(68% 0.015 55);
+    transition: opacity 0.25s ease;
+}
+.hud-side-player.is-offline { opacity: 0.35; }
+.hud-side--right .hud-side-player { flex-direction: row-reverse; }
+.hud-side-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+}
+.hud-side-dot--red   { background: oklch(65% 0.22 25);  color: oklch(65% 0.22 25);  }
+.hud-side-dot--green { background: oklch(85% 0.20 155); color: oklch(85% 0.20 155); }
+.hud-side-dot--blue  { background: oklch(65% 0.18 250); color: oklch(65% 0.18 250); }
+
+/* Hide on narrow viewports — the room itself takes priority. */
+@media (max-width: 1100px) {
+    .hud-side { display: none !important; }
 }
 
 /* ---- Live microphone meter (player wait screen) ----
@@ -1704,12 +1812,15 @@ body {
 }
 
 /* Back-to-start button — anchored top-left of any screen that opts in. */
-/* Primary screen-back ("← Exit to start"). Lives on row 1 left, immediately
-   to the right of the mode-badge so the two read as a single left cluster. */
+/* Primary screen-back ("← Exit to start"). Used on standalone screens
+   (Waiting Room, Player Wait, Roles) — there it's a single back button
+   anchored top-left. Inside #gameHud the same class appears with
+   .hud-host-btn which OVERRIDES the absolute positioning so the
+   buttons can sit inside the flex .hud-host-cluster instead. */
 .screen-back {
     position: absolute;
     top: 14px;
-    left: 132px;      /* mode-badge is ~108px wide + 10px gap */
+    left: 14px;
     z-index: 10;
     padding: 8px 18px;
     font-size: 0.85rem;

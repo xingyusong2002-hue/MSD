@@ -284,18 +284,48 @@ ngrok http 8080</code></pre>
             <div class="drm-center"><span class="drm-zone-label">Center</span></div>
         </div>
 
-        <!-- Host-only exit button (back to Landing). Hidden for players. -->
-        <button id="btnHudExit" class="btn btn-ghost screen-back hidden">← Exit to start</button>
+        <!-- Host-only control cluster — row 2 of the top-left HUD. Wrapped
+             in a flex container so the three buttons auto-space (no more
+             hard-coded left offsets fighting each other when one button's
+             text widens). Each button is still individually shown/hidden
+             via JS; the cluster simply lays out whichever ones are present. -->
+        <div id="hudHostCluster" class="hud-host-cluster">
+            <button id="btnHudExit" class="btn btn-ghost hud-host-btn hidden">← Exit to start</button>
+            <button id="btnBackToLobby" class="btn btn-ghost hud-host-btn hidden">Back to lobby ↺</button>
+            <button id="btnClearFill" class="btn btn-ghost hud-host-btn hidden">Clear Fill</button>
+        </div>
 
-        <!-- Host-only "back to lobby" — abort the current round, return to the
-             mode-and-start lobby. Lets the host change Live Mix / Fill Mode or
-             pick a different starting round. Visible during play only. -->
-        <button id="btnBackToLobby" class="btn btn-ghost screen-back screen-back--secondary hidden">Back to lobby ↺</button>
-
-        <!-- Host-only "Clear Fill" — wipes the Fill Mode paint canvas on
-             every connected projection at once via a WS broadcast. Visible
-             only when host is in dead-room AND mode is 'accumulate'. -->
-        <button id="btnClearFill" class="btn btn-ghost screen-back screen-back--tertiary hidden">Clear Fill</button>
+        <!-- Quiet supporting side panels. Host-only, dead-room-only.
+             Left: mode meaning + sound prompt.
+             Right: connected players list + round indicator.
+             Hidden below 1100px viewport so they never collide with the
+             central room on narrower windows. -->
+        <aside id="hudSideLeft" class="hud-side hud-side--left hidden">
+            <div class="hud-side-section">
+                <p class="hud-side-label">Mode</p>
+                <p class="hud-side-title" id="sideModeName">Live Mix</p>
+                <p class="hud-side-text" id="sideModeText">The room listens to the present</p>
+            </div>
+            <div class="hud-side-section">
+                <p class="hud-side-label">How to play</p>
+                <p class="hud-side-text">Speak · hum · clap · whisper · move while sounding</p>
+            </div>
+        </aside>
+        <aside id="hudSideRight" class="hud-side hud-side--right hidden">
+            <div class="hud-side-section">
+                <p class="hud-side-label">Players</p>
+                <ul id="sidePlayersList" class="hud-side-players">
+                    <li class="hud-side-player" data-role="red"><span class="hud-side-dot hud-side-dot--red"></span><span class="hud-side-player-name">Red</span></li>
+                    <li class="hud-side-player" data-role="green"><span class="hud-side-dot hud-side-dot--green"></span><span class="hud-side-player-name">Green</span></li>
+                    <li class="hud-side-player" data-role="blue"><span class="hud-side-dot hud-side-dot--blue"></span><span class="hud-side-player-name">Blue</span></li>
+                </ul>
+            </div>
+            <div class="hud-side-section">
+                <p class="hud-side-label">Round</p>
+                <p class="hud-side-title" id="sideRoundLabel">— / —</p>
+                <p class="hud-side-text" id="sideRoundKind">—</p>
+            </div>
+        </aside>
 
         <!-- Mode badge (top left) -->
         <div id="modeBadge" class="mode-badge">

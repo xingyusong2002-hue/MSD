@@ -20,6 +20,19 @@
     // during Move Echo. The previous Player Setup screen (name + sound role
     // + upfront zone) was removed as part of the museum-flow simplification.
     const hudZonePicker = document.getElementById('hudZonePicker');
+    // Quiet supporting side panels (host-only, dead-room-only). Updated
+    // each broadcast inside updateFromState.
+    const hudSideLeft   = document.getElementById('hudSideLeft');
+    const hudSideRight  = document.getElementById('hudSideRight');
+    const sideModeName  = document.getElementById('sideModeName');
+    const sideModeText  = document.getElementById('sideModeText');
+    const sideRoundLbl  = document.getElementById('sideRoundLabel');
+    const sideRoundKind = document.getElementById('sideRoundKind');
+    const sidePlayerEls = {
+        red:   document.querySelector('.hud-side-player[data-role="red"]'),
+        green: document.querySelector('.hud-side-player[data-role="green"]'),
+        blue:  document.querySelector('.hud-side-player[data-role="blue"]'),
+    };
     const zoneButtons = document.querySelectorAll('.zone-btn');
     const phoneTouchpad = document.getElementById('phoneTouchpad');
     const touchpadArea  = document.getElementById('touchpadArea');
@@ -818,14 +831,11 @@
         maxRadius: 38,            // was 26 — bigger so collisions read clearly
         cooldownMs: 220,          // per-cell cooldown, no repeat in same area
         burstAlphaPeak: 0.85,     // was implicit 0.75 — slightly brighter
-        // Each burst also sprays a few tiny "blended" micro-particles
-        // around its centre — so the reaction reads as physical
-        // interference (dust) rather than a single flash. These ride on
-        // the existing activeParticles array with role='blend' so they
-        // share the lifetime, boundary cull and trimming caps. The
-        // collision-detection grid skips role='blend' so they can't
-        // chain-cascade collisions.
-        microParticlesPerBurst: 4,
+        // Subtler micro-particles around each burst — a couple of fine
+        // sparks rather than fluffy dust. Previously 4 medium dust
+        // particles read as "smoky"; now 2 fine sparks just suggest
+        // micro-scatter at the interference site without crowding.
+        microParticlesPerBurst: 2,
     };
     let activeCollisionBursts = [];
     const cellCooldowns = new Map();  // cellKey → performance.now() of last burst
@@ -851,18 +861,20 @@
         const blendColor = { r, g, b };
         for (let i = 0; i < COLLISION.microParticlesPerBurst; i++) {
             const a = Math.random() * Math.PI * 2;
-            const s = 0.9 + Math.random() * 1.6;
+            const s = 0.8 + Math.random() * 1.4;
             activeParticles.push({
                 role: 'blend',
                 color: blendColor,
-                x: x + (Math.random() - 0.5) * 6,
-                y: y + (Math.random() - 0.5) * 6,
+                x: x + (Math.random() - 0.5) * 4,
+                y: y + (Math.random() - 0.5) * 4,
                 vx: Math.cos(a) * s,
                 vy: Math.sin(a) * s,
-                size: 0.6 + Math.random() * 1.4,
-                life:    36 + Math.random() * 24,
-                maxLife: 60,
-                alpha: 0.45 + Math.random() * 0.25,
+                // Smaller + finer + dimmer than before — the rings carry
+                // the burst's energy; sparks are just a touch of grain.
+                size: 0.35 + Math.random() * 0.7,
+                life:    22 + Math.random() * 14,
+                maxLife: 36,
+                alpha: 0.28 + Math.random() * 0.20,
             });
         }
     }
@@ -922,24 +934,51 @@
     }
 
     function drawCollisionBursts() {
+        // Redesigned visual language: a collision is now drawn as 2–3
+        // THIN CONCENTRIC RINGS (stroke only, no central fill), in the
+        // blended colour. The previous radial-gradient blob read as a
+        // smoke explosion; rings read as wave interference. Same data
+        // structure on activeCollisionBursts — only this draw function
+        // changed.
         const now = performance.now();
         for (const b of activeCollisionBursts) {
             const t = (now - b.born) / b.duration;     // 0..1
-            // Larger growth fraction so the burst expands more — reads as
-            // a small interference wave rather than a dot pop.
-            const radius = b.maxR * (0.35 + t * 0.85);
-            // Bright at birth, fade fast (ease-out quadratic) so they
-            // read as sparks rather than slow blooms.
-            const a = (1 - t) * (1 - t) * COLLISION.burstAlphaPeak;
-            if (a < 0.02) continue;
-            const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius);
-            grad.addColorStop(0,   `rgba(${b.r},${b.g},${b.b},${a.toFixed(3)})`);
-            grad.addColorStop(0.5, `rgba(${b.r},${b.g},${b.b},${(a * 0.4).toFixed(3)})`);
-            grad.addColorStop(1,   `rgba(${b.r},${b.g},${b.b},0)`);
-            ctx.fillStyle = grad;
+            if (t < 0 || t > 1) continue;
+            // Expansion eases out — fast at birth, slowing toward end of life.
+            const baseR = b.maxR * (0.18 + t * (1.05 - t * 0.2));
+            const peak = (1 - t) * (1 - t) * COLLISION.burstAlphaPeak;
+            if (peak < 0.02) continue;
+            const col = `${b.r},${b.g},${b.b}`;
+
+            // Inner ring — brightest, thinnest at end of life (lineWidth
+            // tapers from 1.4 → 0.6). Sits at ~55% of baseR so its growth
+            // is contained behind the mid/outer rings.
+            ctx.strokeStyle = `rgba(${col},${peak.toFixed(3)})`;
+            ctx.lineWidth = 1.4 - t * 0.8;
             ctx.beginPath();
-            ctx.arc(b.x, b.y, radius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.arc(b.x, b.y, baseR * 0.55, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Mid ring — softer, slightly larger.
+            const midA = peak * 0.70;
+            if (midA > 0.02) {
+                ctx.strokeStyle = `rgba(${col},${midA.toFixed(3)})`;
+                ctx.lineWidth = 1.0 - t * 0.55;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, baseR * 0.85, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            // Outer ring — fainter, longer reach. Appears after t > 0.12
+            // so it staggers behind the inner two — gives the burst a
+            // sense of *propagation* rather than instantaneous expansion.
+            const outA = peak * 0.42;
+            if (t > 0.12 && outA > 0.02) {
+                ctx.strokeStyle = `rgba(${col},${outA.toFixed(3)})`;
+                ctx.lineWidth = 0.65;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, baseR * 1.2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
     }
 
@@ -1532,6 +1571,35 @@
             if (showTouchpad) updateTouchpadDot();
         }
 
+        // Quiet side panels — host-only, dead-room-only. Hidden on narrow
+        // viewports via CSS @media (1100px). Updated from broadcast each
+        // state push so participant dots / round indicator stay live.
+        const showSidePanels = myRole === 'host' && experienceStage === 'dead-room';
+        if (hudSideLeft)  hudSideLeft.classList.toggle('hidden',  !showSidePanels);
+        if (hudSideRight) hudSideRight.classList.toggle('hidden', !showSidePanels);
+        if (showSidePanels) {
+            // Left panel: mode name + meaning.
+            if (sideModeName) sideModeName.textContent = gameMode === 'accumulate' ? 'Fill Mode' : 'Live Mix';
+            if (sideModeText) sideModeText.textContent = gameMode === 'accumulate'
+                ? 'The room remembers where sound has been'
+                : 'The room listens to the present';
+            // Right panel: per-role connection state.
+            for (const role of ROLES) {
+                const el = sidePlayerEls[role];
+                if (!el) continue;
+                el.classList.toggle('is-offline', !connectedPlayers.includes(role));
+            }
+            // Round indicator.
+            if (sideRoundLbl) {
+                const idx = Number.isFinite(s.roundIndex) ? s.roundIndex + 1 : '—';
+                const tot = Number.isFinite(s.totalRounds) ? s.totalRounds : '—';
+                sideRoundLbl.textContent = `${idx} / ${tot}`;
+            }
+            if (sideRoundKind) {
+                sideRoundKind.textContent = (currentRound && KIND_LABELS[currentRound.kind]) || '—';
+            }
+        }
+
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
     }
 
@@ -1726,10 +1794,24 @@
         animationId = requestAnimationFrame(render);
         const w = window.innerWidth, h = window.innerHeight;
         time += 0.016;
-        // Trail fade. Mode-driven — Live Mix fades fast (room becomes
-        // quiet quickly), Fill Mode fades slowly (sound leaves traces).
+        // Trail fade — colour changed from cool near-black (5,5,8) to a
+        // very dark warm brown (18,14,11). Accumulates over frames as
+        // the room's ambient tone, so the projection no longer feels
+        // like a pure black void.
         const mc = getModeConfig();
-        ctx.fillStyle = `rgba(5,5,8,${mc.trailAlpha})`;
+        ctx.fillStyle = `rgba(18,14,11,${mc.trailAlpha})`;
+        ctx.fillRect(0, 0, w, h);
+
+        // Vignette — soft radial darkening that focuses attention on the
+        // centre room. Painted per-frame as a thin overlay; cost is one
+        // gradient + one rect, negligible. Colour is even warmer than the
+        // trail (8,5,3) so corners darken without going grey.
+        const vMax = Math.max(w, h);
+        const vMin = Math.min(w, h);
+        const vg = ctx.createRadialGradient(w/2, h/2, vMin * 0.30, w/2, h/2, vMax * 0.68);
+        vg.addColorStop(0, 'rgba(8, 5, 3, 0)');
+        vg.addColorStop(1, 'rgba(8, 5, 3, 0.55)');
+        ctx.fillStyle = vg;
         ctx.fillRect(0, 0, w, h);
 
         if (myRole && myRole !== 'host') {
