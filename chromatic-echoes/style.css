@@ -1924,10 +1924,15 @@ body {
    Bottom-centre of the player tab's HUD. Mini top-down room rectangle
    with a draggable coloured dot inside. Hidden on host tabs. */
 .phone-touchpad {
+    /* On wide screens the touchpad sits as a vertical side panel anchored
+       to the right edge, leaving the centre of the projection clear so
+       the room playground is visually unobstructed. On narrow screens
+       (phones in portrait) we fall back to the original bottom-centre
+       placement — see the media query below. */
     position: absolute;
-    bottom: 90px;
-    left: 50%;
-    transform: translateX(-50%);
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
     z-index: 6;
     text-align: center;
     user-select: none;
@@ -1937,22 +1942,38 @@ body {
 .touchpad-label {
     display: block;
     font-family: var(--font-body);
-    font-size: 0.65rem;
-    letter-spacing: 0.18em;
+    font-size: 0.58rem;            /* smaller — feels like a side-panel label */
+    letter-spacing: 0.20em;
     text-transform: uppercase;
     color: var(--c-text-dim);
     margin-bottom: 0.55em;
+    opacity: 0.7;                   /* a touch quieter so the panel reads as a control, not a label-first UI */
 }
 .touchpad-area {
     position: relative;
-    width: min(72vw, 280px);
-    height: min(45vw, 175px);   /* ~1.6:1 aspect mirrors the Dead Room layout */
+    width: min(28vw, 240px);
+    height: min(35vw, 200px);       /* slightly taller than wide — fits side panel */
     border-radius: 18px;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     backdrop-filter: var(--glass-blur);
     overflow: hidden;
     cursor: grab;
+}
+/* Narrow-screen fallback — phones in portrait don't have horizontal room
+   for a 240px side panel, so revert to the previous bottom-centre layout. */
+@media (max-width: 720px) {
+    .phone-touchpad {
+        right: auto;
+        top: auto;
+        bottom: 90px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+    .touchpad-area {
+        width: min(72vw, 280px);
+        height: min(45vw, 175px);
+    }
 }
 .touchpad-area:active { cursor: grabbing; }
 .touchpad-frame {

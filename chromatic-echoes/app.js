@@ -121,7 +121,7 @@
         // Multiplier applied AFTER volume scaling — tweakable for "feels
         // empty vs feels chaotic" without changing the underlying volume
         // curve. >1 = richer scatter; <1 = sparser.
-        particleScatterGain: 1.6,
+        particleScatterGain: 2.1,
         // Global cap on simultaneously-alive particles. updateParticles
         // trims oldest entries when this is exceeded so frame rate stays
         // bounded even if three loud players + bursts run at once.
@@ -360,45 +360,104 @@
         return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
     }
 
-    // Subtle boundary stroke + corner ticks. Reads as "this is the room"
-    // without becoming a hard UI frame.
-    function drawRoomBoundary() {
+    // Stylised acoustic-foam border around the room. The TU Delft Dead
+    // Room interior is lined with beige/sand-coloured foam wedges; this is
+    // a top-down symbolic version of that, NOT a literal drawing. Layered:
+    //   1. thick outer dark-warm stroke (the "wall behind the foam")
+    //   2. thin beige inner stroke (the foam's facing edge)
+    //   3. small triangular wedges along each side, pointing inward
+    //   4. a per-wedge sine shimmer so the boundary feels alive
+    //   5. one shared breathing alpha across all layers (~9s period)
+    // No corner ticks — the wedges themselves give the corners definition.
+    // Colours intentionally muted so the boundary doesn't compete with
+    // the sound visuals inside the room.
+    function drawAcousticFoamBoundary() {
         const b = getMapBounds();
+        // Slow alpha breath, period ≈ 9s. Range 0.13..0.37.
+        const breath = 0.25 + 0.12 * Math.sin(time * 0.7);
+        const tickPhase = time * 1.2;
+
         ctx.save();
-        // Faint primary stroke
+
+        // 1. Outer dark warm stroke — the "wall behind the foam".
         drawRoomPath(ctx);
-        ctx.strokeStyle = 'rgba(255,255,255,0.085)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = `rgba(75, 65, 48, ${(breath * 0.85).toFixed(3)})`;
+        ctx.lineWidth = 6;
+        ctx.lineJoin = 'round';
         ctx.stroke();
-        // Even fainter inset stroke (1.5px in) for depth
-        ctx.save();
-        ctx.translate(2, 2);
+
+        // 2. Thin beige inner stroke — the foam's lit facing edge.
         drawRoomPath(ctx);
-        ctx.strokeStyle = 'rgba(255,255,255,0.025)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = `rgba(190, 170, 130, ${(breath * 0.55).toFixed(3)})`;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+
+        // 3. Repeated triangular wedges inward along each edge.
+        // The wedge fill is the mid-tone foam colour. Each wedge's
+        // protrusion length shimmers with a per-wedge sine offset so the
+        // boundary doesn't look like a rigid sawtooth — small, organic.
+        const wedgeBase = 9;          // half-width along the edge
+        const wedgeDepth = 10;        // depth toward the room interior
+        const wedgeSpacing = 24;      // distance between wedge centres
+        ctx.fillStyle = `rgba(120, 105, 80, ${(breath * 1.4).toFixed(3)})`;
+
+        // Top edge — wedges point DOWN into the room
+        for (let x = b.left + wedgeSpacing * 0.7; x < b.right - wedgeSpacing * 0.4; x += wedgeSpacing) {
+            const shimmer = 1 + 0.18 * Math.sin(tickPhase + x * 0.045);
+            ctx.beginPath();
+            ctx.moveTo(x - wedgeBase, b.top);
+            ctx.lineTo(x + wedgeBase, b.top);
+            ctx.lineTo(x,             b.top + wedgeDepth * shimmer);
+            ctx.closePath();
+            ctx.fill();
+        }
+        // Bottom edge — wedges point UP into the room
+        for (let x = b.left + wedgeSpacing * 0.7; x < b.right - wedgeSpacing * 0.4; x += wedgeSpacing) {
+            const shimmer = 1 + 0.18 * Math.sin(tickPhase + x * 0.045 + 1.7);
+            ctx.beginPath();
+            ctx.moveTo(x - wedgeBase, b.bottom);
+            ctx.lineTo(x + wedgeBase, b.bottom);
+            ctx.lineTo(x,             b.bottom - wedgeDepth * shimmer);
+            ctx.closePath();
+            ctx.fill();
+        }
+        // Left edge — wedges point RIGHT into the room
+        for (let y = b.top + wedgeSpacing * 0.7; y < b.bottom - wedgeSpacing * 0.4; y += wedgeSpacing) {
+            const shimmer = 1 + 0.18 * Math.sin(tickPhase + y * 0.045 + 2.9);
+            ctx.beginPath();
+            ctx.moveTo(b.left, y - wedgeBase);
+            ctx.lineTo(b.left, y + wedgeBase);
+            ctx.lineTo(b.left + wedgeDepth * shimmer, y);
+            ctx.closePath();
+            ctx.fill();
+        }
+        // Right edge — wedges point LEFT into the room
+        for (let y = b.top + wedgeSpacing * 0.7; y < b.bottom - wedgeSpacing * 0.4; y += wedgeSpacing) {
+            const shimmer = 1 + 0.18 * Math.sin(tickPhase + y * 0.045 + 4.3);
+            ctx.beginPath();
+            ctx.moveTo(b.right, y - wedgeBase);
+            ctx.lineTo(b.right, y + wedgeBase);
+            ctx.lineTo(b.right - wedgeDepth * shimmer, y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 4. A faint outer "shadow" behind the foam, 3px out from the
+        // path — adds depth so the foam reads as physical thickness
+        // rather than a sticker pasted on the canvas.
+        ctx.save();
+        ctx.translate(-2, -2);
+        drawRoomPath(ctx);
+        ctx.strokeStyle = `rgba(20, 17, 13, ${(breath * 0.65).toFixed(3)})`;
+        ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
-        // Tiny corner ticks — minimal, dark, suggest acoustic-foam corners
-        const tick = 14;
-        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-        ctx.lineWidth = 1.5;
-        ctx.lineCap = 'round';
-        const corners = [
-            [b.left,  b.top,    1,  1],   // top-left
-            [b.right, b.top,   -1,  1],   // top-right
-            [b.left,  b.bottom, 1, -1],   // bottom-left
-            [b.right, b.bottom,-1, -1],   // bottom-right
-        ];
-        for (const [x, y, sx, sy] of corners) {
-            ctx.beginPath();
-            ctx.moveTo(x + sx * 4,    y);
-            ctx.lineTo(x + sx * tick, y);
-            ctx.moveTo(x,             y + sy * 4);
-            ctx.lineTo(x,             y + sy * tick);
-            ctx.stroke();
-        }
+
         ctx.restore();
     }
+
+    // Backwards-compatible alias — the old name was used elsewhere.
+    function drawRoomBoundary() { drawAcousticFoamBoundary(); }
 
     // ---- Offscreen "paint canvas" (Fill Mode memory layer) ----
     // A separate canvas where Fill Mode stamps low-alpha colour blobs at each
@@ -723,9 +782,18 @@
         cellSize: 32,             // grid cell ≈ collision radius
         radius: 22,               // particles within this many px collide
         maxBurstsPerFrame: 6,
-        burstDurationMs: 540,
-        maxRadius: 26,
+        burstDurationMs: 620,     // slightly longer so the flash registers
+        maxRadius: 38,            // was 26 — bigger so collisions read clearly
         cooldownMs: 220,          // per-cell cooldown, no repeat in same area
+        burstAlphaPeak: 0.85,     // was implicit 0.75 — slightly brighter
+        // Each burst also sprays a few tiny "blended" micro-particles
+        // around its centre — so the reaction reads as physical
+        // interference (dust) rather than a single flash. These ride on
+        // the existing activeParticles array with role='blend' so they
+        // share the lifetime, boundary cull and trimming caps. The
+        // collision-detection grid skips role='blend' so they can't
+        // chain-cascade collisions.
+        microParticlesPerBurst: 4,
     };
     let activeCollisionBursts = [];
     const cellCooldowns = new Map();  // cellKey → performance.now() of last burst
@@ -743,6 +811,28 @@
             duration: COLLISION.burstDurationMs,
             maxR: COLLISION.maxRadius,
         });
+        // Micro-particles around the burst — a tiny dust of the blended
+        // colour. They ride in activeParticles with role='blend' so they
+        // share the lifetime / boundary cull / cap behaviour of regular
+        // particles. detectCollisions skips role==='blend' so they cannot
+        // chain new bursts.
+        const blendColor = { r, g, b };
+        for (let i = 0; i < COLLISION.microParticlesPerBurst; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const s = 0.9 + Math.random() * 1.6;
+            activeParticles.push({
+                role: 'blend',
+                color: blendColor,
+                x: x + (Math.random() - 0.5) * 6,
+                y: y + (Math.random() - 0.5) * 6,
+                vx: Math.cos(a) * s,
+                vy: Math.sin(a) * s,
+                size: 0.6 + Math.random() * 1.4,
+                life:    36 + Math.random() * 24,
+                maxLife: 60,
+                alpha: 0.45 + Math.random() * 0.25,
+            });
+        }
     }
 
     function detectCollisions() {
@@ -772,6 +862,9 @@
                 for (let j = i + 1; j < bucket.length; j++) {
                     const b = bucket[j];
                     if (a.role === b.role) continue;
+                    // Micro-particles from a previous burst can't trigger
+                    // a chain — only "real" role particles do.
+                    if (a.role === 'blend' || b.role === 'blend') continue;
                     const dx = a.x - b.x, dy = a.y - b.y;
                     if (dx * dx + dy * dy <= radSq) {
                         spawnCollisionBurst((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, a.color, b.color);
@@ -800,10 +893,12 @@
         const now = performance.now();
         for (const b of activeCollisionBursts) {
             const t = (now - b.born) / b.duration;     // 0..1
-            const radius = b.maxR * (0.4 + t * 0.6);
-            // Bright at birth, fade fast (ease-out cubic) so they read as
-            // sparks rather than slow blooms.
-            const a = (1 - t) * (1 - t) * 0.75;
+            // Larger growth fraction so the burst expands more — reads as
+            // a small interference wave rather than a dot pop.
+            const radius = b.maxR * (0.35 + t * 0.85);
+            // Bright at birth, fade fast (ease-out quadratic) so they
+            // read as sparks rather than slow blooms.
+            const a = (1 - t) * (1 - t) * COLLISION.burstAlphaPeak;
             if (a < 0.02) continue;
             const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius);
             grad.addColorStop(0,   `rgba(${b.r},${b.g},${b.b},${a.toFixed(3)})`);
@@ -848,18 +943,24 @@
         // at 3× threshold we're 100% — so loud sound fully overrides breathing.
         const speaking = Math.max(0, Math.min(1, (volume - CONFIG.volumeThresholdVisual) / (CONFIG.volumeThresholdVisual * 2)));
 
-        const baseR = isConnected ? 9 : 5;
+        // Source dot ~1.5× larger than before (was 9 / 5) so it reads as
+        // an active sound emitter from projection distance. Volume-driven
+        // bonus radius scaled proportionally so the speaking burst still
+        // feels punchy without becoming a giant background disc.
+        const baseR = isConnected ? 14 : 7;
         // Idle radius breathes; speaking adds volume-driven extra.
         const dotR = baseR * (1 - speaking * 0.0)             // baseR doesn't shrink
                     * (1 + (breathSize - 1) * (1 - speaking)) // idle breath fades out as speaking ramps in
-                    + volume * 14 * speaking + volume * 4 * (1 - speaking);
-        const idleAlpha = isConnected ? 0.55 : 0.28;
-        const loudAlpha = isConnected ? 0.92 : 0.55;
+                    + volume * 18 * speaking + volume * 6 * (1 - speaking);
+        const idleAlpha = isConnected ? 0.60 : 0.30;
+        const loudAlpha = isConnected ? 0.95 : 0.58;
         const alphaBase = idleAlpha + (loudAlpha - idleAlpha) * speaking;
         const alpha = Math.max(0.05, Math.min(1, alphaBase * (1 + (breathAlpha - 1) * (1 - speaking))));
 
-        // Outer halo — bigger when speaking, breathing when idle.
-        const haloR = dotR * (2.6 + 1.2 * speaking);
+        // Outer halo — bigger when speaking, breathing when idle. Tighter
+        // halo-to-dot ratio than before so the larger dot doesn't bleed
+        // into a giant fuzzy background disc.
+        const haloR = dotR * (2.3 + 1.0 * speaking);
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
         grad.addColorStop(0, `rgba(${r},${g},${b},${(alpha * 0.45).toFixed(3)})`);
         grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
