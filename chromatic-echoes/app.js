@@ -1083,6 +1083,169 @@
         }
     }
 
+    // ---- Wave-to-wave interference (ring intersections, not particles) ----
+    // Previous collision system detected PARTICLE-PARTICLE overlap. That
+    // works when particles cross but misses the bigger event — the
+    // wavefronts (rings) themselves intersecting. This system listens for
+    // ring-ring circle intersections directly and spawns short-lived
+    // "interference event" markers at the intersection mid-point.
+    //
+    // Each frame we walk pairs of active rings (different roles only),
+    // compute their current radii from age, and test the standard circle-
+    // intersection condition:
+    //     |r1 - r2|  <  d  <  r1 + r2
+    // where d is the distance between ring centres. If true, the two
+    // wavefronts are crossing right now. We compute the intersection
+    // mid-point via the perpendicular-bisector formula:
+    //     a = (r1² - r2² + d²) / (2d)
+    //     mid = centre1 + (a/d) · (centre2 - centre1)
+    // and spawn an interference event there.
+    //
+    // Performance:
+    //   • Per-pair cooldown (220 ms) prevents the same role-pair spawning
+    //     more than ~5 events / second.
+    //   • Per-frame cap (4) prevents pile-ups when many rings are alive.
+    //   • Total per-frame cost ≈ O(rings²); rings are cooldown-bounded
+    //     so the worst case is ~40 rings = 1600 pair checks, each
+    //     extremely cheap.
+    const INTERFERENCE = {
+        cooldownMs: 220,           // per-pair cooldown
+        maxEventsPerFrame: 4,
+        duration: 750,             // 0.75 s fade
+        baseRadius: 16,            // arc radius at birth
+        radiusGrowth: 22,          // additional arc radius gained as t goes 0→1
+        arcsPerSide: 3,            // 3 arcs each side perpendicular to centres axis
+        arcRadialGap: 7,           // gap between concentric arcs
+        peakAlphaMul: 0.85,
+        flickerHz: 9,              // shimmer frequency (Hz-ish)
+    };
+    let activeInterferenceEvents = [];
+    const pairCooldowns = new Map();   // 'red-green' → performance.now()
+
+    function pairKey(a, b) {
+        return a < b ? `${a}-${b}` : `${b}-${a}`;
+    }
+
+    function spawnInterferenceEvent(x, y, colorA, colorB, angle, intensity) {
+        // Blended colour — same recipe as collision burst (averages).
+        activeInterferenceEvents.push({
+            x, y,
+            r: Math.round((colorA.r + colorB.r) / 2),
+            g: Math.round((colorA.g + colorB.g) / 2),
+            b: Math.round((colorA.b + colorB.b) / 2),
+            angle,
+            intensity: Math.min(1, Math.max(0.4, intensity)),
+            born: performance.now(),
+            duration: INTERFERENCE.duration,
+            // Random phase so successive events don't shimmer in lockstep.
+            phase: Math.random() * Math.PI * 2,
+        });
+    }
+
+    function detectWaveInterference() {
+        if (activeRings.length < 2) return;
+        const now = performance.now();
+        // Pre-compute each ring's current radius (in screen px) so we
+        // don't recompute in the inner loop.
+        const cache = [];
+        for (let i = 0; i < activeRings.length; i++) {
+            const r = activeRings[i];
+            const age = (now - r.born) / r.duration;
+            if (age < 0 || age > 1) continue;
+            const rad = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * age;
+            cache.push({ ring: r, age, rad });
+        }
+        let spawned = 0;
+        outer:
+        for (let i = 0; i < cache.length; i++) {
+            const A = cache[i];
+            for (let j = i + 1; j < cache.length; j++) {
+                const B = cache[j];
+                if (A.ring.role === B.ring.role) continue;
+                const key = pairKey(A.ring.role, B.ring.role);
+                const lastAt = pairCooldowns.get(key) || 0;
+                if (now - lastAt < INTERFERENCE.cooldownMs) continue;
+                const dx = B.ring.x - A.ring.x;
+                const dy = B.ring.y - A.ring.y;
+                const d  = Math.sqrt(dx * dx + dy * dy);
+                if (d < 1) continue;
+                // Circle-intersection condition.
+                if (Math.abs(A.rad - B.rad) < d && d < A.rad + B.rad) {
+                    // Perpendicular-bisector midpoint between intersections.
+                    const a = (A.rad * A.rad - B.rad * B.rad + d * d) / (2 * d);
+                    const mx = A.ring.x + (dx / d) * a;
+                    const my = A.ring.y + (dy / d) * a;
+                    // Angle from A to B — arcs draw PERPENDICULAR to this.
+                    const angle = Math.atan2(dy, dx);
+                    const intensity = (A.ring.intensity + B.ring.intensity) * 0.5;
+                    spawnInterferenceEvent(mx, my, A.ring.color, B.ring.color, angle, intensity);
+                    pairCooldowns.set(key, now);
+                    spawned++;
+                    if (spawned >= INTERFERENCE.maxEventsPerFrame) break outer;
+                }
+            }
+        }
+        // Prune stale cooldown entries periodically.
+        if (pairCooldowns.size > 12) {
+            for (const [k, t] of pairCooldowns) {
+                if (now - t > INTERFERENCE.cooldownMs * 6) pairCooldowns.delete(k);
+            }
+        }
+    }
+
+    function updateInterferenceEvents() {
+        const now = performance.now();
+        activeInterferenceEvents = activeInterferenceEvents.filter(e => now - e.born < e.duration);
+    }
+
+    function drawInterferenceEvents() {
+        const now = performance.now();
+        for (const ev of activeInterferenceEvents) {
+            const t = (now - ev.born) / ev.duration;
+            if (t < 0 || t > 1) continue;
+
+            // Alpha envelope: sin(t·π) → peaks at mid-life, fades both ends.
+            // Subtle flicker at INTERFERENCE.flickerHz so it shimmers.
+            const env = Math.sin(t * Math.PI);
+            const flick = 0.85 + 0.18 * Math.sin(t * Math.PI * INTERFERENCE.flickerHz + ev.phase);
+            const peak  = env * flick * INTERFERENCE.peakAlphaMul * ev.intensity;
+            if (peak < 0.04) continue;
+
+            const baseR = INTERFERENCE.baseRadius + INTERFERENCE.radiusGrowth * t;
+            const col = `${ev.r},${ev.g},${ev.b}`;
+
+            // Three thin curved arcs on EACH side of the centres-axis —
+            // perpendicular to the line connecting the two ring centres.
+            // The result reads as "wave bands crossing here".
+            ctx.strokeStyle = `rgba(${col},${peak.toFixed(3)})`;
+            ctx.lineWidth = 1.2;
+            const arcSpan = 0.95;          // ~54° arc per stroke
+            for (let side = 0; side < 2; side++) {
+                const sign = side === 0 ? -1 : 1;
+                const a0 = ev.angle + sign * Math.PI / 2 - arcSpan / 2;
+                for (let k = 0; k < INTERFERENCE.arcsPerSide; k++) {
+                    const r = baseR + k * INTERFERENCE.arcRadialGap;
+                    // Outer arcs fainter — gives the band a sense of depth.
+                    const arcAlpha = peak * (1 - k * 0.22);
+                    if (arcAlpha < 0.04) continue;
+                    ctx.strokeStyle = `rgba(${col},${arcAlpha.toFixed(3)})`;
+                    ctx.beginPath();
+                    ctx.arc(ev.x, ev.y, r, a0, a0 + arcSpan);
+                    ctx.stroke();
+                }
+            }
+            // Bright small pulse at the exact intersection midpoint.
+            // Peaks in the first third of the event then fades.
+            if (t < 0.35) {
+                const pulseAlpha = (1 - t / 0.35) * 0.75 * ev.intensity;
+                ctx.fillStyle = `rgba(${col},${pulseAlpha.toFixed(3)})`;
+                ctx.beginPath();
+                ctx.arc(ev.x, ev.y, 2.2 + (1 - t) * 3.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+
     // Per-role phase offsets for the breathing animation. Thirds of 2π so
     // the three colours never pulse in lockstep — that lockstep would read
     // as scripted UI rather than three independent living sound sources.
@@ -1331,6 +1494,45 @@
                   : pct < 12 ? 'listening…'
                   : pct < 40 ? 'transmitting'
                   : 'transmitting · loud';
+            }
+
+            // Live mic state on the PLAYER-SIDE PANEL. Previously updated
+            // only in updateFromState (server-state cadence ≈ once per
+            // join/state-transition) which made it stuck on "silent".
+            // Now driven by this 90ms interval, same source as the
+            // wait-screen meter, so the panel reads live as the player
+            // actually speaks.
+            const playerStateEl = document.getElementById('playerSideMicState');
+            const playerMeterEl = document.getElementById('playerSideMicMeter');
+            if (playerStateEl) {
+                let state, cls;
+                if (!analyser) {
+                    state = 'Mic unavailable';
+                    cls   = 'is-unavailable';
+                } else if (audioCtx && audioCtx.state !== 'running') {
+                    state = `Mic ${audioCtx.state}`;
+                    cls   = 'is-unavailable';
+                } else if (raw < 0.005) {
+                    state = 'Quiet';
+                    cls   = 'is-quiet';
+                } else if (raw < 0.020) {
+                    state = 'Listening';
+                    cls   = 'is-listening';
+                } else if (raw < 0.080) {
+                    state = 'Speaking';
+                    cls   = 'is-speaking';
+                } else {
+                    state = 'Loud';
+                    cls   = 'is-loud';
+                }
+                playerStateEl.textContent = state;
+                playerStateEl.classList.remove('is-quiet', 'is-listening',
+                    'is-speaking', 'is-loud', 'is-unavailable');
+                playerStateEl.classList.add(cls);
+            }
+            if (playerMeterEl) {
+                // Same scale as the wait-screen meter for consistency.
+                playerMeterEl.style.width = Math.min(100, Math.round(raw * 600)) + '%';
             }
         }, 90);
     }
@@ -1724,21 +1926,10 @@
             if (playerSideInstr) {
                 playerSideInstr.textContent = (currentRound && currentRound.instruction) || '—';
             }
-            // Mic state — derived from this client's mic capture, not from
-            // the server frame (which carries smoothed volume only).
-            if (playerSideMic) {
-                let state = 'no mic', cls = 'is-quiet';
-                if (analyser && audioCtx && audioCtx.state === 'running') {
-                    const raw = getVolumeRaw();
-                    if (raw < 0.005)      { state = 'silent';      cls = 'is-quiet'; }
-                    else if (raw < 0.020) { state = 'listening…';  cls = 'is-listening'; }
-                    else if (raw < 0.080) { state = 'speaking';    cls = 'is-speaking'; }
-                    else                  { state = 'loud';        cls = 'is-speaking'; }
-                }
-                playerSideMic.textContent = state;
-                playerSideMic.classList.remove('is-quiet', 'is-listening', 'is-speaking');
-                playerSideMic.classList.add(cls);
-            }
+            // (playerSideMic text + class is now driven by the 90ms
+            // mic-meter interval inside startMicMeter — see there. This
+            // updateFromState handler only fires on server state pushes,
+            // which is too rare to keep the mic status live.)
         }
 
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
@@ -1793,6 +1984,31 @@
         for (const c of ROLES) {
             const t = (f.volumes && f.volumes[c]) || 0;
             smoothVolumes[c] += (t - smoothVolumes[c]) * 0.2;
+        }
+
+        // Host's right-side panel per-role status pills. Updated on EVERY
+        // frame (~30 Hz) using the just-smoothed broadcast volumes, so a
+        // host watching all three players sees their state change as it
+        // happens. Thresholds use CONFIG.volumeThresholdVisual multiples
+        // so they share the SAME tuning space as the particle/ring
+        // visibility gates — easier to reason about.
+        if (myRole === 'host') {
+            const T = CONFIG.volumeThresholdVisual;     // 0.04 default
+            for (const role of ROLES) {
+                const el = document.querySelector(`[data-role-status="${role}"]`);
+                if (!el) continue;
+                const v = smoothVolumes[role];
+                const connected = connectedPlayers.includes(role);
+                let label, cls;
+                if (!connected)              { label = 'offline';   cls = 'is-offline';   }
+                else if (v < T * 0.5)        { label = 'quiet';     cls = 'is-quiet';     }
+                else if (v < T)              { label = 'listening'; cls = 'is-listening'; }
+                else if (v < T * 2.5)        { label = 'speaking';  cls = 'is-speaking';  }
+                else                         { label = 'loud';      cls = 'is-loud';      }
+                el.textContent = label;
+                el.classList.remove('is-quiet', 'is-listening', 'is-speaking', 'is-loud', 'is-offline');
+                el.classList.add(cls);
+            }
         }
 
         // Raw-volume bars (visual liveness: "yes, you're heard").
@@ -2052,14 +2268,21 @@
 
         // Rings, particles, collision bursts — all inside the clip.
         updateRings();
+        // Wave-to-wave interference (ring intersections, different roles).
+        // Detected BEFORE drawRings so the event marker can be drawn
+        // alongside the rings that produced it. The detect uses the same
+        // age-driven radii drawRings will use, so they're consistent.
+        detectWaveInterference();
         drawRings();
         updateParticles();
-        // Collision detection runs AFTER particle update so positions are
-        // current. Bursts are spawned outside the clip would still draw
-        // here because we run drawCollisionBursts() inside this region.
+        // Collision detection (particle-particle) runs AFTER particle
+        // update so positions are current. Bursts + wave-interference
+        // events both draw INSIDE the room-clip region.
         detectCollisions();
         updateCollisionBursts();
         drawCollisionBursts();
+        updateInterferenceEvents();
+        drawInterferenceEvents();
         drawParticles();
 
         ctx.restore();

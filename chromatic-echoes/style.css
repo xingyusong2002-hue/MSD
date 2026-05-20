@@ -1700,7 +1700,21 @@ body {
     height: 14px;
     border-radius: 50%;
     box-shadow: 0 0 8px currentColor;
+    flex: 0 0 14px;
 }
+.hud-side-player-name { flex: 1 1 auto; }
+.hud-side-player-status {
+    font-size: 0.78rem;
+    color: oklch(64% 0.012 55);
+    font-style: italic;
+    text-transform: lowercase;
+    transition: color 0.25s ease, font-weight 0.25s ease;
+}
+.hud-side-player-status.is-quiet     { color: oklch(60% 0.012 55); }
+.hud-side-player-status.is-listening { color: oklch(78% 0.020 55); font-style: normal; }
+.hud-side-player-status.is-speaking  { color: oklch(92% 0.035 55); font-style: normal; font-weight: 500; }
+.hud-side-player-status.is-loud      { color: oklch(94% 0.06 50);  font-style: normal; font-weight: 600; }
+.hud-side-player-status.is-offline   { color: oklch(50% 0.010 55); font-style: italic; opacity: 0.6; }
 .hud-side-dot--red   { background: oklch(65% 0.22 25);  color: oklch(65% 0.22 25);  }
 .hud-side-dot--green { background: oklch(85% 0.20 155); color: oklch(85% 0.20 155); }
 .hud-side-dot--blue  { background: oklch(65% 0.18 250); color: oklch(65% 0.18 250); }
@@ -1743,11 +1757,39 @@ body {
     color: oklch(92% 0.025 55);
     font-weight: 400;
 }
-/* Microphone state pill colours — quiet → muted brown; listening → calm
-   warm cream; speaking → role-coloured glow. Updated each frame in JS. */
-#playerSideMicState.is-quiet     { color: oklch(60% 0.012 55); font-style: italic; }
-#playerSideMicState.is-listening { color: oklch(78% 0.020 55); }
-#playerSideMicState.is-speaking  { color: oklch(90% 0.035 55); font-weight: 500; letter-spacing: 0.03em; }
+/* Microphone state pill colours — five live states:
+     quiet       → muted brown, italic
+     listening   → calm warm cream
+     speaking    → bright cream, medium weight
+     loud        → warmer, stronger
+     unavailable → faint red-brown (mic permission denied / suspended)
+   Updated every 90ms by the mic-meter interval — see startMicMeter. */
+#playerSideMicState.is-quiet       { color: oklch(60% 0.012 55); font-style: italic; }
+#playerSideMicState.is-listening   { color: oklch(78% 0.020 55); }
+#playerSideMicState.is-speaking    { color: oklch(92% 0.035 55); font-weight: 500; letter-spacing: 0.03em; }
+#playerSideMicState.is-loud        { color: oklch(94% 0.06 50);  font-weight: 600; letter-spacing: 0.04em; text-shadow: 0 0 8px oklch(70% 0.10 50 / 0.5); }
+#playerSideMicState.is-unavailable { color: oklch(58% 0.08 25);  font-style: italic; }
+
+/* Inline volume meter inside the player card. Same scale as the wait-
+   screen meter (raw * 600 -> %). Transitions in width so single-sample
+   spikes don't look glitchy. */
+.player-mic-meter-track {
+    margin-top: 10px;
+    height: 6px;
+    border-radius: 999px;
+    background: oklch(100% 0 0 / 0.06);
+    overflow: hidden;
+}
+.player-mic-meter-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        oklch(65% 0.18 250),
+        oklch(85% 0.20 155),
+        oklch(65% 0.22 25));
+    transition: width 80ms linear;
+}
 
 /* Hide on narrow viewports — the room itself takes priority. */
 @media (max-width: 1100px) {

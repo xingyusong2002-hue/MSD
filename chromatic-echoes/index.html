@@ -336,7 +336,13 @@ ngrok http 8080</code></pre>
             </div>
             <div class="hud-side-section">
                 <p class="hud-side-label">Microphone</p>
-                <p class="hud-side-text" id="playerSideMicState">listening…</p>
+                <p class="hud-side-text" id="playerSideMicState">Listening</p>
+                <!-- Thin volume meter — driven by the same 90ms mic interval
+                     that drives the wait-screen meter, so it reads live as
+                     the player actually speaks. -->
+                <div class="player-mic-meter-track">
+                    <div id="playerSideMicMeter" class="player-mic-meter-fill"></div>
+                </div>
             </div>
         </aside>
 
@@ -344,9 +350,21 @@ ngrok http 8080</code></pre>
             <div class="hud-side-section">
                 <p class="hud-side-label">Players</p>
                 <ul id="sidePlayersList" class="hud-side-players">
-                    <li class="hud-side-player" data-role="red"><span class="hud-side-dot hud-side-dot--red"></span><span class="hud-side-player-name">Red</span></li>
-                    <li class="hud-side-player" data-role="green"><span class="hud-side-dot hud-side-dot--green"></span><span class="hud-side-player-name">Green</span></li>
-                    <li class="hud-side-player" data-role="blue"><span class="hud-side-dot hud-side-dot--blue"></span><span class="hud-side-player-name">Blue</span></li>
+                    <li class="hud-side-player" data-role="red">
+                        <span class="hud-side-dot hud-side-dot--red"></span>
+                        <span class="hud-side-player-name">Red</span>
+                        <span class="hud-side-player-status" data-role-status="red">—</span>
+                    </li>
+                    <li class="hud-side-player" data-role="green">
+                        <span class="hud-side-dot hud-side-dot--green"></span>
+                        <span class="hud-side-player-name">Green</span>
+                        <span class="hud-side-player-status" data-role-status="green">—</span>
+                    </li>
+                    <li class="hud-side-player" data-role="blue">
+                        <span class="hud-side-dot hud-side-dot--blue"></span>
+                        <span class="hud-side-player-name">Blue</span>
+                        <span class="hud-side-player-status" data-role-status="blue">—</span>
+                    </li>
                 </ul>
             </div>
             <div class="hud-side-section">
