@@ -58,12 +58,39 @@ const STAGES = ['waiting-room', 'threshold', 'dead-room', 'archive'];
 // the round design + Mix Echo targets simpler.
 const ROLES = ['red', 'green', 'blue'];
 
-// Visitor-declared position in the Dead Room. No GPS — visitor taps a zone
-// button on their phone. Default per-role (so particle emitters don't all
-// stack at Center, where they'd be invisible against the mix glow); the
-// visitor can still tap Center on their phone if they actually stand there.
+// Visitor-declared position in the Dead Room. No GPS, no camera, no
+// Bluetooth — visitor either taps a zone button or drags the touchpad on
+// their phone. The touchpad is the new "manual tracking prototype"
+// (simulated tracking) — see set_position handler below.
 const ZONES = ['A', 'B', 'C', 'Center'];
 const DEFAULT_ZONE_FOR = { red: 'A', green: 'B', blue: 'C' };
+
+// Normalised (0..1) per-role default positions. Used when a player joins
+// without specifying one, and when their touchpad position resets. These
+// values pull players slightly toward the centre vs the zone-corner
+// extremes so the default arrangement reads as a triangle, not as
+// "everyone in their corner".
+const DEFAULT_POSITION_FOR = {
+    red:   { x: 0.30, y: 0.35 },
+    green: { x: 0.70, y: 0.35 },
+    blue:  { x: 0.50, y: 0.68 },
+};
+
+// Zone → normalised position lookup. set_zone (the discrete Move-Echo
+// picker) writes the matching position into game.positions; set_position
+// (the touchpad) writes directly. Both paths converge on the same state.
+const ZONE_POSITIONS = {
+    A:      { x: 0.18, y: 0.22 },
+    B:      { x: 0.82, y: 0.22 },
+    C:      { x: 0.50, y: 0.80 },
+    Center: { x: 0.50, y: 0.50 },
+};
+
+function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
+function defaultPositionFor(role) {
+    const p = DEFAULT_POSITION_FOR[role] || { x: 0.5, y: 0.5 };
+    return { x: p.x, y: p.y };
+}
 
 // How the visitor describes the sound they want to make. Visible to the host
 // and embedded in archive records; does NOT alter mix maths in MVP.
@@ -81,6 +108,8 @@ function perRole(defaultValue) {
 let game = createFreshGame();
 
 function createFreshGame() {
+    const positions = {};
+    for (const r of ROLES) positions[r] = defaultPositionFor(r);
     return {
         experienceStage: 'waiting-room', // outer museum stage (see STAGES)
         phase: 'lobby',                  // lobby | playing | success (inner, dead-room only)
@@ -89,7 +118,8 @@ function createFreshGame() {
         players:     perRole(null),      // role -> ws | null
         names:       perRole(''),        // role -> visitor-typed name (may be empty)
         soundRoles:  perRole(''),        // role -> one of SOUND_ROLES, or '' if not set
-        zones:       perRole('Center'),  // role -> one of ZONES
+        zones:       perRole('Center'),  // role -> one of ZONES (kept for back-compat)
+        positions,                       // role -> { x: 0..1, y: 0..1 } normalised
         volumes:     perRole(0),         // role -> 0..1, live volume from phone
         accumulated: perRole(0),         // role -> for accumulate mode
         matchTimer: 0,
@@ -114,6 +144,7 @@ function getPlayerDescriptor(role) {
         name: game.names[role] || '',
         soundRole: game.soundRoles[role] || null,
         zone: game.zones[role] || 'Center',
+        position: game.positions[role] || defaultPositionFor(role),
         connected: !!game.players[role],
         volume: game.volumes[role] || 0,
     };
@@ -304,6 +335,10 @@ function startGameLoop() {
             mode: game.mode,
             volumes: { ...game.volumes },
             accumulated: { ...game.accumulated },
+            // Positions ride along on every frame so the touchpad-driven
+            // movement reaches all clients at ~30 Hz without a separate
+            // broadcast on every set_position.
+            positions: JSON.parse(JSON.stringify(game.positions)),
             currentMix: mix,
             matchTimer: game.matchTimer,
             matchRequired: MATCH_HOLD_FRAMES,
@@ -360,17 +395,21 @@ wss.on('connection', (ws) => {
                     // than waiting for a separate set_meta round-trip.
                     if (typeof msg.name === 'string')      game.names[role] = msg.name.slice(0, 40);
                     if (SOUND_ROLES.includes(msg.soundRole)) game.soundRoles[role] = msg.soundRole;
-                    // Zone: visitor's explicit choice wins. Otherwise default
-                    // to the role's natural corner (Red→A, Green→B, Blue→C)
-                    // so particles emit from a clearly visible position
-                    // instead of stacking at Center.
+                    // Zone (discrete) + position (continuous) both seeded here.
                     if (ZONES.includes(msg.zone)) {
                         game.zones[role] = msg.zone;
+                        game.positions[role] = { ...(ZONE_POSITIONS[msg.zone] || defaultPositionFor(role)) };
                     } else {
                         game.zones[role] = DEFAULT_ZONE_FOR[role] || 'Center';
+                        game.positions[role] = defaultPositionFor(role);
+                    }
+                    // An explicit msg.position on join wins over the zone-derived default.
+                    if (msg.position && Number.isFinite(msg.position.x) && Number.isFinite(msg.position.y)) {
+                        game.positions[role] = { x: clamp01(msg.position.x), y: clamp01(msg.position.y) };
                     }
                     ws.send(JSON.stringify({ type: 'assigned', role }));
-                    console.log(`Player ${role} joined (${msg.name || 'no name'}, ${msg.soundRole || '—'}, zone ${game.zones[role]})`);
+                    const p = game.positions[role];
+                    console.log(`Player ${role} joined (zone ${game.zones[role]}, pos ${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
                 }
 
                 broadcastState();
@@ -393,13 +432,47 @@ wss.on('connection', (ws) => {
             }
 
             case 'set_zone': {
-                // Visitor taps a zone button. Allowed any time so they can
-                // move during Move Echo or re-anchor between rounds. Default
-                // 'Center' if an unknown zone is sent.
+                // Discrete jump to a zone preset. Now ALSO writes the
+                // corresponding normalised position so the projection-side
+                // single-source-of-truth (game.positions) stays in sync.
                 const role = ws._role;
                 if (!role || !ROLES.includes(role)) return;
                 if (game.players[role] !== ws) return;
-                game.zones[role] = ZONES.includes(msg.zone) ? msg.zone : 'Center';
+                const zone = ZONES.includes(msg.zone) ? msg.zone : 'Center';
+                game.zones[role] = zone;
+                game.positions[role] = { ...(ZONE_POSITIONS[zone] || defaultPositionFor(role)) };
+                broadcastState();
+                break;
+            }
+
+            case 'set_position': {
+                // Manual tracking prototype (simulated tracking). Phone
+                // touchpad sends normalised x/y as the visitor drags. NOT
+                // real positioning — no GPS, no camera. Server just stores
+                // and re-broadcasts. Throttled on the client to ~10 Hz so
+                // this handler stays cheap.
+                const role = ws._role;
+                if (!role || !ROLES.includes(role)) return;
+                if (game.players[role] !== ws) return;
+                const x = clamp01(msg.x);
+                const y = clamp01(msg.y);
+                game.positions[role] = { x, y };
+                // No broadcastState here — the 30 Hz frame loop already
+                // carries positions in every frame (see frame broadcast
+                // below), which is the right cadence for "live drag".
+                break;
+            }
+
+            case 'host_set_position': {
+                // Wizard-of-Oz testing — the host's keyboard shortcuts
+                // (1/2/3/4 = Red, Q/W/E/T = Green, A/S/D/F = Blue) drop a
+                // player's marker onto a preset point without needing a
+                // real phone in that slot. Host-only by construction.
+                if (ws._role !== 'host') return;
+                if (!ROLES.includes(msg.role)) return;
+                const x = clamp01(msg.x);
+                const y = clamp01(msg.y);
+                game.positions[msg.role] = { x, y };
                 broadcastState();
                 break;
             }
@@ -549,8 +622,10 @@ wss.on('connection', (ws) => {
             game.soundRoles[r] = '';
             // Reset to the role's natural corner, not 'Center' — so the
             // next visitor on this colour starts visibly anchored even if
-            // they don't tap a zone button.
+            // they don't tap a zone button. Position resets to the per-
+            // role default so the touchpad-driven dot returns home too.
             game.zones[r] = DEFAULT_ZONE_FOR[r] || 'Center';
+            game.positions[r] = defaultPositionFor(r);
             broadcastState();
             console.log(`Player ${r} left`);
         }

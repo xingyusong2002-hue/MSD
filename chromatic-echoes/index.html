@@ -250,6 +250,20 @@
             <p class="hud-empty-text">Open a second window, click <b>Join Game</b>, and pick a colour to bring the room to life.</p>
         </div>
 
+        <!-- Phone touchpad — manual tracking prototype (simulated tracking,
+             NOT GPS). Visible on player tabs in the Dead Room. Visitor drags
+             the coloured dot inside a top-down room rectangle; the page
+             sends normalised x/y as {type:'set_position', x, y} throttled
+             to ~10 Hz. Server broadcasts; every projection sees the dot
+             move (lerp-smoothed) and ripples now spawn from the live spot. -->
+        <div id="phoneTouchpad" class="phone-touchpad hidden">
+            <span class="touchpad-label">drag to move your sound</span>
+            <div id="touchpadArea" class="touchpad-area">
+                <div class="touchpad-frame"></div>
+                <div id="touchpadDot" class="touchpad-dot"></div>
+            </div>
+        </div>
+
         <!-- Move-Echo zone picker — appears INSIDE the game HUD, only when
              the current round kind is 'move' AND this tab is a player.
              Hidden by default; toggled on from updateFromState. Mirrors
@@ -292,8 +306,12 @@
             </div>
         </div>
 
-        <!-- Mixing box (center) -->
-        <div id="mixingBox" class="mixing-box">
+        <!-- Centre mixing box — DOM kept as the off-screen state buffer the
+             render loop reads from (mixR/G/B percentages, matchProgressBar).
+             CSS hides the visual container so there's no hard centre circle:
+                • Live Mix shows the balance in the new HUD mix bar below.
+                • Fill Mode draws a soft canvas accumulation field at centre. -->
+        <div id="mixingBox" class="mixing-box mixing-box--hidden">
             <div id="mixingFill" class="mixing-fill"></div>
             <div class="mixing-percentages">
                 <span class="mp-r">R: <b id="mixR">0</b>%</span>
@@ -302,6 +320,21 @@
             </div>
             <div id="matchProgress" class="match-progress">
                 <div id="matchProgressBar" class="match-progress-bar"></div>
+            </div>
+        </div>
+
+        <!-- HUD mix bar — slim stacked colour bar showing the current R/G/B
+             balance. Always visible (replaces what the central mixing box
+             used to show). Match-progress overlays here during Mix Echo. -->
+        <div id="hudMixBar" class="hud-mix-bar">
+            <span class="hud-mix-bar-label">live balance</span>
+            <div class="hud-mix-bar-track">
+                <div id="hudMixSegR" class="hud-mix-seg hud-mix-seg-r"></div>
+                <div id="hudMixSegG" class="hud-mix-seg hud-mix-seg-g"></div>
+                <div id="hudMixSegB" class="hud-mix-seg hud-mix-seg-b"></div>
+            </div>
+            <div id="hudMatchProgress" class="hud-match-progress">
+                <div id="hudMatchProgressBar" class="hud-match-progress-bar"></div>
             </div>
         </div>
 

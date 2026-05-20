@@ -1639,6 +1639,129 @@ body {
     grid-column: span 2;       /* full-width middle row */
 }
 
+/* ---- Hide the legacy central mixing box ----
+   The DOM stays as the off-screen state buffer (#mixR/G/B, match progress
+   bar) read by updateFrame, but the visual container is suppressed so
+   there's no "hard centre target" on the projection. Live Mix is now
+   centre-blank; Fill Mode paints a soft canvas accumulation field. */
+.mixing-box--hidden {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ---- HUD mix bar (replaces the central mixing readout) ----
+   Slim, top-centre, always visible during play. Three coloured segments
+   that scale with each role's share of the live mix. Slim green match
+   progress bar underneath fills during Mix Echo. */
+.hud-mix-bar {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    width: min(420px, 80vw);
+    padding: 8px 14px 10px;
+    border-radius: 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    pointer-events: none;
+    text-align: center;
+}
+.hud-mix-bar-label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.62rem;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    color: var(--c-text-dim);
+    margin-bottom: 6px;
+}
+.hud-mix-bar-track {
+    display: flex;
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: oklch(100% 0 0 / 0.04);
+}
+.hud-mix-seg {
+    height: 100%;
+    transition: width 120ms linear;
+}
+.hud-mix-seg-r { background: var(--c-red);   }
+.hud-mix-seg-g { background: var(--c-green); }
+.hud-mix-seg-b { background: var(--c-blue);  }
+.hud-match-progress {
+    margin-top: 5px;
+    width: 100%;
+    height: 2px;
+    border-radius: 999px;
+    background: oklch(100% 0 0 / 0.05);
+    overflow: hidden;
+}
+.hud-match-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: oklch(85% 0.20 155);   /* green */
+    transition: width 80ms linear;
+}
+
+/* ---- Phone touchpad (manual tracking prototype) ----
+   Bottom-centre of the player tab's HUD. Mini top-down room rectangle
+   with a draggable coloured dot inside. Hidden on host tabs. */
+.phone-touchpad {
+    position: absolute;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    text-align: center;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+.touchpad-label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.65rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--c-text-dim);
+    margin-bottom: 0.55em;
+}
+.touchpad-area {
+    position: relative;
+    width: min(72vw, 280px);
+    height: min(45vw, 175px);   /* ~1.6:1 aspect mirrors the Dead Room layout */
+    border-radius: 18px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    overflow: hidden;
+    cursor: grab;
+}
+.touchpad-area:active { cursor: grabbing; }
+.touchpad-frame {
+    position: absolute;
+    inset: 8px;
+    border-radius: 12px;
+    border: 1px dashed oklch(100% 0 0 / 0.10);
+    pointer-events: none;
+}
+.touchpad-dot {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--c-text);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 0 14px currentColor;
+    transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
 /* ---- HUD zone picker (Move Echo only) ----
    Compact pill anchored bottom-centre of the projection HUD. Shown only
    when the round kind is 'move' AND this tab is a player (handled in

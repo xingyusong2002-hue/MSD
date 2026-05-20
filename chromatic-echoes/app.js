@@ -21,6 +21,9 @@
     // + upfront zone) was removed as part of the museum-flow simplification.
     const hudZonePicker = document.getElementById('hudZonePicker');
     const zoneButtons = document.querySelectorAll('.zone-btn');
+    const phoneTouchpad = document.getElementById('phoneTouchpad');
+    const touchpadArea  = document.getElementById('touchpadArea');
+    const touchpadDot   = document.getElementById('touchpadDot');
     const gameHud = document.getElementById('gameHud');
     const stageToolbar = document.getElementById('stageToolbar');
     const stageToolbarBtns = document.querySelectorAll('.stage-toolbar-btn');
@@ -62,6 +65,12 @@
     const mixG = document.getElementById('mixG');
     const mixB = document.getElementById('mixB');
     const mixingFill = document.getElementById('mixingFill');
+    // HUD mix bar — slim stacked colour bar that replaces the central
+    // mixing box's readout. Always visible during play in both modes.
+    const hudMixSegR = document.getElementById('hudMixSegR');
+    const hudMixSegG = document.getElementById('hudMixSegG');
+    const hudMixSegB = document.getElementById('hudMixSegB');
+    const hudMatchProgressBar = document.getElementById('hudMatchProgressBar');
     const mixingBox = document.getElementById('mixingBox');
     const matchProgressBar = document.getElementById('matchProgressBar');
     const barRed = document.getElementById('barRed');
@@ -99,41 +108,90 @@
     const CONFIG = {
         volumeThreshold: 0.008,        // mic gating threshold (audio side, RMS)
         volumeMax: 0.30,                // mic ceiling
-        trailAlpha: 0.06,               // canvas trail darkening per frame
-        // ---- Event-driven particle emitter (secondary texture layer) ----
-        // The wavefront rings below are now the primary visual; particles
-        // are a soft texture underneath. Smaller, more numerous, lower
-        // alpha so they read as "fine dust" rather than chunky dots.
-        volumeThresholdVisual: 0.04,    // below this, NO new particles spawn
-        particlesPerFramePerVolume: 10, // more particles, but each is small + faint
+        // trailAlpha lives in MODE_CONFIG now — Live Mix and Fill Mode use
+        // different fade rates (the central differentiator between the two).
+        // ---- Event-driven particle emitter ----
+        volumeThresholdVisual: 0.04,
+        particlesPerFramePerVolume: 10,
         particleMaxSpeed: 3.2,
-        particleMinSize: 0.5,           // was 1 — smoother
-        particleMaxSize: 2.2,           // was 5 — much less chunky
-        particleBaseLifetime: 120,      // frames; slightly longer for soft fade
-        particleCenterPull: 0.05,       // applied ONLY in Mix Echo (see shouldUseCenterPull)
+        particleMinSize: 0.5,
+        particleMaxSize: 2.2,
+        particleBaseLifetime: 120,     // multiplied by MODE_CONFIG.particleLifeMul
+        particleCenterPull: 0.05,      // gated by shouldUseCenterPull(kind)
         particleDamping: 0.985,
-        particleAlphaMin: 0.18,         // base alpha lower bound (was 0.55)
-        particleAlphaMax: 0.42,         // upper bound (was ~0.9)
-        // ---- Source cloud (anchor glow at the player's zone) ----
-        cloudBaseRadius: 90,
-        cloudMaxRadius: 200,
-        cloudLayers: 5,
-        cloudMinOpacity: 0.18,
-        cloudMaxOpacity: 0.48,
-        // ---- Source pulse rings — PRIMARY visual, the "sound wavefront" ----
-        // Thinner, softer, more frequent — so consecutive rings overlap into
-        // a continuous expanding wavefront rather than reading as discrete
-        // warning circles. The "stone in pond" effect.
-        ringMinCooldownMs: 70,          // ring spawns ~14/s at full volume
-        ringMaxCooldownMs: 240,         // ~4/s at threshold volume
-        ringBaseRadius: 18,             // start small at the source
-        ringTravel: 460,                // long expansion so they reach far
-        ringTravelSec: 1.8,             // slow expansion = elegant
-        ringStartAlphaMin: 0.28,        // softer at low volume
-        ringStartAlphaMax: 0.62,        // softer at full volume (was 0.95)
-        ringLineMin: 1.2,               // very thin at end of life
-        ringLineMax: 3.0,               // thin even at birth (was 9 = "warning")
+        particleAlphaMin: 0.18,
+        particleAlphaMax: 0.42,
+        // ---- Source aura (small local glow at the player's anchor) ----
+        // Was a big 5-layer wall of colour (90-200 px radius, ~0.18-0.48
+        // alpha). Tuned WAY down so the ripple/wavefront is the primary
+        // visual — the aura is now just a small "this is alive" halo, not
+        // a background wash that fights the ripple for attention.
+        cloudBaseRadius: 26,
+        cloudMaxRadius: 78,
+        cloudLayers: 3,
+        cloudMinOpacity: 0.05,
+        cloudMaxOpacity: 0.20,
+        // ---- Source wavefront rings — the PRIMARY visual ----
+        // Larger reach, slower expansion, thinner stroke, softer alpha than
+        // before: the user asked for rings that "expand further and fade
+        // more smoothly" so they feel like sound rather than warnings.
+        // Rings are NOT culled at the map boundary — they fade naturally
+        // over their own duration so the wavefront stays continuous.
+        ringMinCooldownMs: 70,
+        ringMaxCooldownMs: 240,
+        ringBaseRadius: 18,
+        ringTravel: 700,               // was 460 — bigger reach
+        ringTravelSec: 2.8,            // was 1.8 — slower, more elegant
+        ringStartAlphaMin: 0.16,       // soft at threshold volume
+        ringStartAlphaMax: 0.55,       // brighter at loud volume (was 0.45)
+        ringLineMin: 0.8,
+        ringLineMax: 2.6,              // a touch thicker at loud volume (was 2.2)
+        // Volume coefficient for ring max radius: maxRadius = base + travel ×
+        // (radiusVolMin + radiusVolGain × volume). Old (0.7 + 0.5×vol) gave
+        // only ~1.7× range between silent and loud rings. New (0.20 + 0.90×vol)
+        // gives ~5.5× — soft sounds make small ripples, loud ones make big
+        // ones. Loudness now genuinely shapes the visual.
+        ringRadiusVolMin: 0.20,
+        ringRadiusVolGain: 0.90,
+        // ---- Manual-tracking lerp ----
+        positionLerpRate: 0.14,        // 0 = no smoothing, 1 = instant
     };
+
+    // Per-mode visual differentiation. The user picks Live Mix or Fill Mode
+    // from the host lobby; these values change WHAT the visualisation says
+    // about that choice, beyond the existing match-math difference.
+    //
+    // Live Mix — "what you hear right now":
+    //   • faster canvas trail fade (room becomes quiet quickly)
+    //   • particles + rings die quicker
+    //   • no painted field — nothing is preserved across the round
+    //
+    // Fill Mode — "your sound leaves traces":
+    //   • very slow trail fade (paint persists for ~10 s)
+    //   • particles + rings live longer
+    //   • a low-alpha "paint field" stamp is laid down every frame each
+    //     speaking player is at, building up the room with their colour
+    const MODE_CONFIG = {
+        live: {
+            trailAlpha: 0.10,           // strong fade → room clears quickly
+            particleLifeMul: 0.70,      // particles die quicker
+            ringLifeMul: 0.85,
+            paintField: false,
+            paintFieldAlpha: 0,
+            paintFieldRadius: 0,
+        },
+        accumulate: {
+            trailAlpha: 0.012,          // very slow fade → traces persist
+            particleLifeMul: 1.80,      // particles linger
+            ringLifeMul: 1.35,          // rings travel further over time
+            paintField: true,
+            paintFieldAlpha: 0.035,     // very soft so it builds up
+            paintFieldRadius: 64,       // blob size at threshold volume
+        },
+    };
+    function getModeConfig() {
+        return MODE_CONFIG[gameMode] || MODE_CONFIG.live;
+    }
 
     // Which rounds should pull particles toward the centre mix point?
     // Only Mix Echo — where the *meaning* of the centre is "blend your
@@ -161,6 +219,27 @@
     // away — the protocol's `name` and `soundRole` join fields are still
     // accepted server-side but the client no longer sends them.
     let myZone = '';
+
+    // ---- Manual-tracking prototype state ----
+    // Normalised positions (0..1) per role. Two layers:
+    //   • targetPositions: the latest server-broadcast position (set by
+    //     touchpad drags, set_zone, or host_set_position keyboard shortcuts).
+    //   • smoothedPositions: lerped each frame toward target so the dot
+    //     glides rather than snapping across the room.
+    // Defaults match the server's DEFAULT_POSITION_FOR so initial render
+    // doesn't have a one-frame snap when the first broadcast arrives.
+    const DEFAULT_NORM_POS = {
+        red:   { x: 0.30, y: 0.35 },
+        green: { x: 0.70, y: 0.35 },
+        blue:  { x: 0.50, y: 0.68 },
+    };
+    function clonePos(p) { return { x: p.x, y: p.y }; }
+    const targetPositions   = { red: clonePos(DEFAULT_NORM_POS.red),
+                                green: clonePos(DEFAULT_NORM_POS.green),
+                                blue: clonePos(DEFAULT_NORM_POS.blue) };
+    const smoothedPositions = { red: clonePos(DEFAULT_NORM_POS.red),
+                                green: clonePos(DEFAULT_NORM_POS.green),
+                                blue: clonePos(DEFAULT_NORM_POS.blue) };
     let audioCtx, analyser, timeDomainData;
 
     // Human-readable labels used on the HUD instruction strip.
@@ -168,20 +247,6 @@
     let animationId = null, time = 0;
     let smoothVolumes = { red: 0, green: 0, blue: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
-
-    // Pure function: visitor-declared zone → on-screen anchor coordinates.
-    // No GPS / IMU / camera. Each colour's source position is its player's
-    // current zone (broadcast from the server). See docs/UI_ARCHITECTURE.md.
-    function getZonePosition(zone, w, h) {
-        const m = Math.min(w, h) * 0.20;
-        switch (zone) {
-            case 'A':      return { x: m,         y: m         };  // top-left
-            case 'B':      return { x: w - m,     y: m         };  // top-right
-            case 'C':      return { x: w / 2,     y: h - m     };  // bottom-centre
-            case 'Center':
-            default:       return { x: w / 2,     y: h / 2     };
-        }
-    }
 
     // ---- Canvas ----
     function resizeCanvas() {
@@ -191,19 +256,25 @@
         canvas.style.width = window.innerWidth + 'px';
         canvas.style.height = window.innerHeight + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        computePositions();
+        computeMixCenter();
     }
-    // Recompute every role's source position from the latest broadcast zones.
-    // Called on resize and on each state broadcast (because the visitor's
-    // zone change for any role moves that role's anchor).
-    function computePositions() {
+    // Recompute the mix-centre anchor only. Per-role positions used to be
+    // baked here from discrete zone names; they're now derived per frame
+    // from smoothedPositions (see render loop) so dragging the touchpad
+    // produces continuous, lerp-smoothed movement on every projection.
+    function computeMixCenter() {
         const w = window.innerWidth, h = window.innerHeight;
         mixCenter = { x: w / 2, y: h / 2 };
-        const zoneByRole = {};
-        for (const p of playersInfo) zoneByRole[p.role] = p.zone || 'Center';
-        for (const role of ROLES) {
-            sourcePositions[role] = getZonePosition(zoneByRole[role] || 'Center', w, h);
-        }
+    }
+    // Convert a normalised (0..1, 0..1) position into screen coordinates,
+    // confined to the Dead Room map's drawn rectangle so dots and ripple
+    // origins stay inside the visible "room" rather than the whole window.
+    function getScreenPositionFromNormalised(p) {
+        const b = getMapBounds();
+        return {
+            x: b.left + Math.max(0, Math.min(1, p.x)) * (b.right - b.left),
+            y: b.top  + Math.max(0, Math.min(1, p.y)) * (b.bottom - b.top),
+        };
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
@@ -290,8 +361,10 @@
                 vx: Math.cos(angle) * speed,
                 vy: Math.sin(angle) * speed,
                 size: CONFIG.particleMinSize + Math.random() * sizeRange * (0.4 + volume * 0.6),
-                life:    CONFIG.particleBaseLifetime * (0.8 + volume * 0.5),
-                maxLife: CONFIG.particleBaseLifetime * (0.8 + volume * 0.5),
+                // Mode-driven lifetime: Live Mix particles die quickly; Fill
+                // Mode particles linger so movement traces stay visible.
+                life:    CONFIG.particleBaseLifetime * (0.8 + volume * 0.5) * getModeConfig().particleLifeMul,
+                maxLife: CONFIG.particleBaseLifetime * (0.8 + volume * 0.5) * getModeConfig().particleLifeMul,
                 // Lower alpha range so particles read as texture, not dots.
                 alpha: CONFIG.particleAlphaMin + Math.random() * (CONFIG.particleAlphaMax - CONFIG.particleAlphaMin),
             });
@@ -373,16 +446,20 @@
         if (now - lastRingAt[role] < cooldown) return;
         lastRingAt[role] = now;
         const startAlpha = CONFIG.ringStartAlphaMin + (CONFIG.ringStartAlphaMax - CONFIG.ringStartAlphaMin) * Math.min(1, volume);
+        const ringLifeMul = getModeConfig().ringLifeMul;
         activeRings.push({
             role,
             color: COLORS[role],
             x: src.x,
             y: src.y,
             born: now,
-            duration: CONFIG.ringTravelSec * 1000,
-            // Larger maxRadius even at low volume so rings reach far enough
-            // to be visible from across the projection.
-            maxRadius: CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.7 + 0.5 * volume),
+            // Duration scaled by mode + slightly by volume — loud rings linger
+            // a little longer, so the wavefront feels like it has presence.
+            duration: CONFIG.ringTravelSec * 1000 * ringLifeMul * (0.80 + 0.35 * Math.min(1, volume)),
+            // Sound-responsive radius: small ripples for whispers, big ones
+            // for shouts (see ringRadiusVolMin/Gain CONFIG comments).
+            maxRadius: CONFIG.ringBaseRadius
+                + CONFIG.ringTravel * (CONFIG.ringRadiusVolMin + CONFIG.ringRadiusVolGain * Math.min(1, volume)),
             startAlpha,
         });
         if (debugVisible) {
@@ -415,22 +492,57 @@
         }
     }
 
-    // ---- Source dot (Task B's "stable dot") ----
-    // A small filled circle that always sits at the player's zone anchor,
-    // so even with no particles the visitor can see "you're here". Pulses
-    // gently with volume.
+    // Per-role phase offsets for the breathing animation. Thirds of 2π so
+    // the three colours never pulse in lockstep — that lockstep would read
+    // as scripted UI rather than three independent living sound sources.
+    const BREATH_PHASE = { red: 0.0, green: 2.094, blue: 4.188 };
+    // Smoothed volume per role for the "speaking burst" envelope on the dot.
+    // Reads directly from smoothVolumes / simulatedVolumes; no extra state.
+
+    // ---- Source dot (breathing, volume-reactive) ----
+    // Idle (volume below visual threshold):
+    //   • subtle sinusoidal breathing on size + alpha (per-role phase
+    //     offset so each colour breathes independently)
+    //   • two layered sines (slow + faster) for an irregular, organic feel
+    //     instead of a perfect mechanical cosine
+    // Speaking (volume above threshold):
+    //   • breathing is "won over" by a stronger volume-driven response
+    //   • size, alpha and outer-halo radius all jump with volume
+    //   • crossfade so the transition between idle and speaking doesn't snap
     function drawSourceDot(cx, cy, volume, color, isConnected) {
         const { r, g, b } = COLORS[color];
+
+        // Two-frequency sinusoidal idle breathing, ±10% on size, ±15% on alpha.
+        const phase = BREATH_PHASE[color] || 0;
+        const slow  = Math.sin(time * 1.4 + phase);            // ~0.22 Hz, dominant
+        const fast  = Math.sin(time * 3.1 + phase * 1.7) * 0.3; // wobble overlay
+        const breath = (slow + fast) * 0.5;                    // -1..+1 ish
+        const breathSize  = 1 + 0.18 * breath;                 // size mult
+        const breathAlpha = 1 + 0.22 * breath;                 // alpha mult
+
+        // Idle vs speaking blend factor. At threshold (0.04) we're 0% speaking,
+        // at 3× threshold we're 100% — so loud sound fully overrides breathing.
+        const speaking = Math.max(0, Math.min(1, (volume - CONFIG.volumeThresholdVisual) / (CONFIG.volumeThresholdVisual * 2)));
+
         const baseR = isConnected ? 9 : 5;
-        const dotR = baseR + volume * 14;
-        const alpha = isConnected ? 0.75 : 0.32;
-        // Outer subtle halo
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dotR * 3);
-        grad.addColorStop(0, `rgba(${r},${g},${b},${(alpha * 0.5).toFixed(3)})`);
+        // Idle radius breathes; speaking adds volume-driven extra.
+        const dotR = baseR * (1 - speaking * 0.0)             // baseR doesn't shrink
+                    * (1 + (breathSize - 1) * (1 - speaking)) // idle breath fades out as speaking ramps in
+                    + volume * 14 * speaking + volume * 4 * (1 - speaking);
+        const idleAlpha = isConnected ? 0.55 : 0.28;
+        const loudAlpha = isConnected ? 0.92 : 0.55;
+        const alphaBase = idleAlpha + (loudAlpha - idleAlpha) * speaking;
+        const alpha = Math.max(0.05, Math.min(1, alphaBase * (1 + (breathAlpha - 1) * (1 - speaking))));
+
+        // Outer halo — bigger when speaking, breathing when idle.
+        const haloR = dotR * (2.6 + 1.2 * speaking);
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${(alpha * 0.45).toFixed(3)})`);
         grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-        ctx.beginPath(); ctx.arc(cx, cy, dotR * 3, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
         ctx.fillStyle = grad; ctx.fill();
-        // Solid dot
+
+        // Solid dot.
         ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
         ctx.fill();
@@ -480,14 +592,34 @@
         ctx.restore();
     }
 
-    function drawMixingBoxGlow(mix) {
+    // Centre rendering is now mode-aware. The previous single function drew
+    // a hard ~150 px radial gradient in BOTH modes — which created the
+    // "hard centre target" the user wanted to remove. Now:
+    //   • Live Mix: nothing on the canvas at the centre. The room listens to
+    //     the present; the colour balance is shown in the HUD mix bar.
+    //   • Fill Mode: a broad, very soft accumulation field — no hard edge,
+    //     no rigid circle. Big radius, low alpha, picks up the current mix
+    //     colour. Combined with the slow Fill-Mode trail fade, this builds
+    //     a "the room remembers where sound has been" haze.
+    function drawAccumulationField(mix) {
         if (mix.total < 0.05) return;
-        const r = Math.round((mix.r / 100) * 255), g = Math.round((mix.g / 100) * 255), b = Math.round((mix.b / 100) * 255);
-        const intensity = gameMode === 'accumulate' ? Math.min(0.5, mix.total * 0.05 + 0.1) : Math.min(0.3, mix.total * 0.15);
-        const grad = ctx.createRadialGradient(mixCenter.x, mixCenter.y, 20, mixCenter.x, mixCenter.y, 150);
-        grad.addColorStop(0, `rgba(${r},${g},${b},${intensity.toFixed(3)})`);
+        const r = Math.round((mix.r / 100) * 255);
+        const g = Math.round((mix.g / 100) * 255);
+        const b = Math.round((mix.b / 100) * 255);
+        // Large, soft radial — alpha low so it accumulates rather than
+        // dominating. Goes well beyond the old 150 px so the "middle" reads
+        // as a region, not a target. Radius scales with screen so it stays
+        // proportional on a large projection.
+        const radius = Math.min(window.innerWidth, window.innerHeight) * 0.45;
+        const alpha = Math.min(0.085, mix.total * 0.012 + 0.025);
+        const grad = ctx.createRadialGradient(mixCenter.x, mixCenter.y, 0, mixCenter.x, mixCenter.y, radius);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${alpha.toFixed(3)})`);
+        grad.addColorStop(0.55, `rgba(${r},${g},${b},${(alpha * 0.5).toFixed(3)})`);
         grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-        ctx.beginPath(); ctx.arc(mixCenter.x, mixCenter.y, 150, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+        ctx.beginPath();
+        ctx.arc(mixCenter.x, mixCenter.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
     }
 
     // ---- Utilities ----
@@ -708,9 +840,15 @@
                 zoneButtons.forEach(b => b.classList.toggle('active', b.dataset.zone === myZone));
             }
         }
-        // Player zones live on each playersInfo entry. Recompute the
-        // anchors so the next frame renders dots at the right zones.
-        computePositions();
+        // Read each role's target normalised position from the broadcast.
+        // The render loop lerps smoothedPositions toward these each frame
+        // so the projection glides rather than snapping (Task B).
+        for (const p of playersInfo) {
+            if (p.position && Number.isFinite(p.position.x) && Number.isFinite(p.position.y)) {
+                targetPositions[p.role] = { x: p.position.x, y: p.position.y };
+            }
+        }
+        computeMixCenter();
 
         // Update mode buttons in lobby
         modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === gameMode));
@@ -725,8 +863,8 @@
         // Player mode hint
         if (playerModeHint) {
             playerModeHint.textContent = gameMode === 'accumulate'
-                ? 'Mode: Fill — your sound will collect color in the mixing box'
-                : 'Mode: Live Mix — match the target ratio with your volume';
+                ? 'Fill Mode — move and make sound. Your colour stays in the room as a trace.'
+                : 'Live Mix — make sound now. The room shows the live balance of your voices.';
         }
 
         // Lobby slots — iterate ROLES. Guard against missing DOM in case
@@ -843,6 +981,15 @@
                 && currentRound && currentRound.kind === 'move';
             hudZonePicker.classList.toggle('hidden', !showPicker);
         }
+        // Phone touchpad — visitor-side ONLY, visible whenever the visitor
+        // is inside the Dead Room (lobby or playing) so they can preview
+        // their position before the round AND adjust it mid-round.
+        if (phoneTouchpad) {
+            const showTouchpad = !!myRole && myRole !== 'host'
+                && experienceStage === 'dead-room';
+            phoneTouchpad.classList.toggle('hidden', !showTouchpad);
+            if (showTouchpad) updateTouchpadDot();
+        }
 
         if (s.target) updateTargetDisplay(s.target, s.roundIndex, s.totalRounds);
     }
@@ -873,6 +1020,17 @@
         gameMode = f.mode || gameMode;
         const kind = f.kind || (currentRound && currentRound.kind) || 'mix';
         lastFrameAt = performance.now();  // for the debug panel's "last frame: Xms ago"
+        // Ingest per-role positions from the frame stream — this is the
+        // high-frequency channel for touchpad drags. The render loop lerps
+        // smoothedPositions toward these so movement looks continuous.
+        if (f.positions) {
+            for (const role of ROLES) {
+                const p = f.positions[role];
+                if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+                    targetPositions[role] = { x: p.x, y: p.y };
+                }
+            }
+        }
         if (debugVisible && lastFrameAt - lastFrameLogAt > 1000) {
             lastFrameLogAt = lastFrameAt;
             console.log('[frame] kind=' + kind + ' volumes=', f.volumes,
@@ -937,6 +1095,19 @@
         } else {
             mixingBox.style.borderColor = gameMode === 'accumulate' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.1)';
             mixingBox.style.boxShadow = gameMode === 'accumulate' ? 'inset 0 0 30px rgba(0,0,0,0.5)' : 'none';
+        }
+        // HUD mix bar (replaces the central mixing-box readout). Three
+        // segments side-by-side, widths proportional to each colour's share
+        // of the live mix; segments stay coloured so the visitor can read
+        // balance at a glance from anywhere in the room. Match progress
+        // shows as a slim green bar below.
+        if (hudMixSegR && hudMixSegG && hudMixSegB) {
+            hudMixSegR.style.width = mix.r + '%';
+            hudMixSegG.style.width = mix.g + '%';
+            hudMixSegB.style.width = mix.b + '%';
+        }
+        if (hudMatchProgressBar) {
+            hudMatchProgressBar.style.width = matchPct + '%';
         }
     }
 
@@ -1014,13 +1185,53 @@
         animationId = requestAnimationFrame(render);
         const w = window.innerWidth, h = window.innerHeight;
         time += 0.016;
-        ctx.fillStyle = `rgba(5,5,8,${CONFIG.trailAlpha})`; ctx.fillRect(0, 0, w, h);
+        // Trail fade. Mode-driven — Live Mix fades fast (room becomes
+        // quiet quickly), Fill Mode fades slowly (sound leaves traces).
+        const mc = getModeConfig();
+        ctx.fillStyle = `rgba(5,5,8,${mc.trailAlpha})`;
+        ctx.fillRect(0, 0, w, h);
 
         if (myRole && myRole !== 'host') {
             // Defensive resume in case the keep-alive interval was lost.
             if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
             const vol = getVolume();
             send({ type: 'volume', level: vol });
+        }
+
+        // ---- Position lerp ----
+        // Glide smoothedPositions toward targetPositions every frame so a
+        // touchpad drag (or a host_set_position keyboard shortcut) doesn't
+        // teleport the dot — it drifts. Then derive screen coords from
+        // the smoothed values, NOT from discrete zones.
+        const lerpRate = CONFIG.positionLerpRate;
+        for (const role of ROLES) {
+            const t = targetPositions[role], s = smoothedPositions[role];
+            s.x += (t.x - s.x) * lerpRate;
+            s.y += (t.y - s.y) * lerpRate;
+            sourcePositions[role] = getScreenPositionFromNormalised(s);
+        }
+
+        // ---- Paint field (Fill Mode only) ----
+        // Stamp a soft low-alpha colour blob at each speaking role's
+        // current screen position. The slow trail fade in Fill Mode keeps
+        // these stamps visible for ~10 seconds, so a moving + speaking
+        // player visibly PAINTS the room along their movement path.
+        if (mc.paintField) {
+            for (const role of ROLES) {
+                const src = sourcePositions[role];
+                if (!src) continue;
+                const vol = Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
+                if (vol < CONFIG.volumeThresholdVisual) continue;
+                const color = COLORS[role];
+                const blobR = mc.paintFieldRadius + vol * 30;
+                const grad = ctx.createRadialGradient(src.x, src.y, 0, src.x, src.y, blobR);
+                grad.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${(mc.paintFieldAlpha * (0.5 + vol * 0.5)).toFixed(3)})`);
+                grad.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(src.x, src.y, blobR, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
         // Per-role anchors + emitters. Each role is independent — a silent
@@ -1057,12 +1268,14 @@
         updateParticles();
         drawParticles();
 
-        // Centre mixing glow (existing behaviour).
+        // Centre region. Mode-specific:
+        //   • Fill Mode: broad, soft accumulation field — "the room remembers"
+        //   • Live Mix:  nothing on canvas; the HUD mix bar shows balance
         const mix = {
             r: parseInt(mixR.textContent) || 0, g: parseInt(mixG.textContent) || 0,
             b: parseInt(mixB.textContent) || 0, total: smoothVolumes.red + smoothVolumes.green + smoothVolumes.blue
         };
-        drawMixingBoxGlow(mix);
+        if (gameMode === 'accumulate') drawAccumulationField(mix);
 
         // Debug panel refresh (cheap — only DOM writes if visible).
         if (debugVisible) renderDebugPanel();
@@ -1083,6 +1296,68 @@
         if (myRole && myRole !== 'host') send({ type: 'set_zone', zone });
     }
     zoneButtons.forEach(b => b.addEventListener('click', () => applyZone(b.dataset.zone)));
+
+    // ---- Phone touchpad (manual tracking prototype) ----
+    // Visitor drags the dot inside the rectangle. We update the local
+    // dot immediately (so it feels responsive), update targetPositions
+    // locally (so the host's projection on this tab moves immediately
+    // even before the server frame echoes back), and throttle the
+    // outgoing set_position messages to ~10 Hz so the WS doesn't get
+    // hammered by per-pointer-event sends.
+    let touchpadDragging = false;
+    let lastSetPositionAt = 0;
+    function emitTouchpadPosition(clientX, clientY) {
+        if (!touchpadArea || !myRole || myRole === 'host') return;
+        const rect = touchpadArea.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (clientY - rect.top)  / rect.height));
+        // Update local target so the projection here glides immediately.
+        targetPositions[myRole] = { x, y };
+        updateTouchpadDot();
+        // Throttled WS send. Final position on pointerup is sent
+        // separately so a quick tap-and-release isn't lost.
+        const now = performance.now();
+        if (now - lastSetPositionAt > 90) {
+            lastSetPositionAt = now;
+            send({ type: 'set_position', x, y });
+        }
+    }
+    function updateTouchpadDot() {
+        if (!touchpadDot || !myRole || myRole === 'host') return;
+        const p = targetPositions[myRole] || { x: 0.5, y: 0.5 };
+        touchpadDot.style.left = (p.x * 100) + '%';
+        touchpadDot.style.top  = (p.y * 100) + '%';
+        const c = COLORS[myRole];
+        if (c) {
+            touchpadDot.style.background = `rgb(${c.r},${c.g},${c.b})`;
+            touchpadDot.style.boxShadow  = `0 0 14px rgb(${c.r},${c.g},${c.b})`;
+        }
+    }
+    if (touchpadArea) {
+        touchpadArea.addEventListener('pointerdown', e => {
+            if (!myRole || myRole === 'host') return;
+            try { touchpadArea.setPointerCapture(e.pointerId); } catch (_) {}
+            touchpadDragging = true;
+            emitTouchpadPosition(e.clientX, e.clientY);
+        });
+        touchpadArea.addEventListener('pointermove', e => {
+            if (!touchpadDragging) return;
+            emitTouchpadPosition(e.clientX, e.clientY);
+        });
+        const endDrag = e => {
+            if (!touchpadDragging) return;
+            touchpadDragging = false;
+            // Send final position unthrottled so a quick tap commits.
+            const rect = touchpadArea.getBoundingClientRect();
+            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const y = Math.max(0, Math.min(1, (e.clientY - rect.top)  / rect.height));
+            targetPositions[myRole] = { x, y };
+            updateTouchpadDot();
+            send({ type: 'set_position', x, y });
+        };
+        touchpadArea.addEventListener('pointerup', endDrag);
+        touchpadArea.addEventListener('pointercancel', endDrag);
+    }
 
     roleCards.forEach(card => {
         card.addEventListener('click', async () => {
@@ -1185,9 +1460,40 @@
         // Host-only sim bursts. We check myRole rather than tab role so a
         // visitor's phone can't accidentally trigger them.
         if (myRole !== 'host') return;
-        if (k === 'r') simulateBurst('red');
-        else if (k === 'g') simulateBurst('green');
-        else if (k === 'b') simulateBurst('blue');
+        if (k === 'r') { simulateBurst('red');   return; }
+        if (k === 'g') { simulateBurst('green'); return; }
+        if (k === 'b') { simulateBurst('blue');  return; }
+
+        // Wizard-of-Oz position presets — drop a role onto a preset spot
+        // without a real phone in that slot. Sent over WS via the
+        // host_set_position handler so EVERY projection sees the move.
+        //   Red:    1 / 2 / 3 / 4  →  A / B / C / Center
+        //   Green:  Q / W / E / T  →  A / B / C / Center
+        //          (R would collide with the volume burst above — using T
+        //           keeps the QWERTY-row idea while preserving R-for-burst)
+        //   Blue:   A / S / D / F  →  A / B / C / Center
+        const POSITION_PRESETS = {
+            A:      { x: 0.18, y: 0.22 },
+            B:      { x: 0.82, y: 0.22 },
+            C:      { x: 0.50, y: 0.80 },
+            Center: { x: 0.50, y: 0.50 },
+        };
+        const POS_KEYMAP = {
+            // Red row — number row
+            '1': ['red',   'A'], '2': ['red',   'B'], '3': ['red',   'C'], '4': ['red',   'Center'],
+            // Green row — Q/W/E/T (T not R, because R is already the
+            // volume-burst key above and we can't double-bind)
+            'q': ['green', 'A'], 'w': ['green', 'B'], 'e': ['green', 'C'], 't': ['green', 'Center'],
+            // Blue row — A/S/Z/F (Z not D, because D is the debug toggle)
+            'a': ['blue',  'A'], 's': ['blue',  'B'], 'z': ['blue',  'C'], 'f': ['blue',  'Center'],
+        };
+        const bound = POS_KEYMAP[k];
+        if (bound) {
+            const [role, preset] = bound;
+            const p = POSITION_PRESETS[preset];
+            send({ type: 'host_set_position', role, x: p.x, y: p.y });
+            if (debugVisible) console.log(`[host-pos] ${role} → ${preset} (${p.x}, ${p.y})`);
+        }
     });
 
     // ---- Init ----
