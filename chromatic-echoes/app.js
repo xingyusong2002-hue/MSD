@@ -33,6 +33,15 @@
         green: document.querySelector('.hud-side-player[data-role="green"]'),
         blue:  document.querySelector('.hud-side-player[data-role="blue"]'),
     };
+    // Player-side panel (visitor view — different from host's overview).
+    const hudSidePlayer     = document.getElementById('hudSidePlayer');
+    const playerSwatchEl    = document.getElementById('playerIdentitySwatch');
+    const playerNameEl      = document.getElementById('playerIdentityName');
+    const playerSideMode    = document.getElementById('playerSideModeName');
+    const playerSideModeTxt = document.getElementById('playerSideModeText');
+    const playerSideKind    = document.getElementById('playerSideRoundKind');
+    const playerSideInstr   = document.getElementById('playerSideInstruction');
+    const playerSideMic     = document.getElementById('playerSideMicState');
     const zoneButtons = document.querySelectorAll('.zone-btn');
     const phoneTouchpad = document.getElementById('phoneTouchpad');
     const touchpadArea  = document.getElementById('touchpadArea');
@@ -785,6 +794,11 @@
             maxRadius: CONFIG.ringBaseRadius
                 + CONFIG.ringTravel * (CONFIG.ringRadiusVolMin + CONFIG.ringRadiusVolGain * Math.min(1, volume)),
             startAlpha,
+            // Pseudo-3D wavefront state baked at spawn so each ring evolves
+            // independently. wobbleSeed gives each its own sine phase;
+            // intensity (0..1) modulates wobble amplitude + layer spacing.
+            wobbleSeed: Math.random() * Math.PI * 2,
+            intensity:  Math.min(1, volume),
         });
         if (debugVisible) {
             console.log(`[ring] role=${role} vol=${volume.toFixed(2)} from (${Math.round(src.x)}, ${Math.round(src.y)}) startAlpha=${startAlpha.toFixed(2)} maxR=${Math.round(CONFIG.ringBaseRadius + CONFIG.ringTravel * (0.7 + 0.5 * volume))}`);
@@ -796,23 +810,88 @@
         activeRings = activeRings.filter(r => (now - r.born) < r.duration);
     }
 
+    // Pseudo-3D wavefronts. Replaces the previous flat ctx.arc() rings.
+    // Each ring is now drawn as THREE concentric layered polygons (inner
+    // bright / mid / outer faint) with:
+    //   • Organic sine-combo deformation (radius wobbles around the
+    //     circle, unique seed per ring).
+    //   • Y-axis foreshortening (perspective compression, y *= 0.82).
+    //   • Doppler asymmetric deformation in the source's motion
+    //     direction (compress in front, stretch behind) — the moving
+    //     velocity is read from roleVelocityScreen.
+    // All three effects use the same polygon-of-segments scaffolding, so
+    // adding them is just extra terms on the per-segment radius. Cost:
+    // for SEGMENTS=64 and 3 layers, ~ 200 lineTo calls per ring per
+    // frame. With the ring-cooldown cap, total work stays bounded.
+    const SEGMENTS = 64;
+    const PERSPECTIVE_Y = 0.82;   // <1 = horizontal-ellipse, top-down room feel
     function drawRings() {
         const now = performance.now();
+        // Per-frame time for sine wobble — keeps phase continuous across
+        // frames so the ring breathes smoothly rather than ticking.
+        const tg = time * 2.0;
+
         for (const r of activeRings) {
-            const t = (now - r.born) / r.duration;   // 0..1
+            const t = (now - r.born) / r.duration;
             if (t < 0 || t > 1) continue;
+
             const radius = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * t;
-            // Ease-out alpha for a "fade rather than vanish" feel.
-            const alpha = r.startAlpha * (1 - t) * (1 - t);
-            if (alpha < 0.02) continue;
-            // Thick rings at birth, thinner as they expand — so the source is
-            // clearly the brightest point.
+            const baseAlpha = r.startAlpha * (1 - t) * (1 - t);
+            if (baseAlpha < 0.02) continue;
             const lineW = CONFIG.ringLineMin + (CONFIG.ringLineMax - CONFIG.ringLineMin) * (1 - t);
-            ctx.beginPath();
-            ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${alpha.toFixed(3)})`;
-            ctx.lineWidth = lineW;
-            ctx.stroke();
+
+            // Wobble amplitudes scale with the ring's spawn intensity (volume).
+            // Two frequencies summed = organic curve, no obvious sinusoid.
+            const wobbleA = 4 + r.intensity * 9;     // low-frequency, larger
+            const wobbleB = 1.5 + r.intensity * 4.5; // higher-frequency, smaller
+            const phase = tg + r.wobbleSeed;
+
+            // Doppler bias from current source velocity (not the velocity
+            // at spawn time — keeps the visual responsive if the source
+            // stops mid-ring-life).
+            const v = roleVelocityScreen[r.role] || { x: 0, y: 0 };
+            const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
+            const moving = speedPx > 0.6;
+            const motionAngle = moving ? Math.atan2(v.y, v.x) : 0;
+            const dopplerK = moving ? Math.min(speedPx * 1.8, 18) : 0;
+
+            // Three layered polygons → fake depth. Each layer's scale,
+            // alpha, and lineWidth differ so the eye reads them as
+            // overlapping volumetric wavefronts instead of a single line.
+            // Inner = brightest + thinnest; outer = faintest + thinnest.
+            // Mid carries the bulk of the ring's visual weight.
+            const layers = [
+                { scale: 0.82, alphaMul: 1.00, lineMul: 0.90 },  // inner
+                { scale: 1.00, alphaMul: 0.68, lineMul: 1.00 },  // mid
+                { scale: 1.22, alphaMul: 0.38, lineMul: 0.55 },  // outer
+            ];
+            for (const lay of layers) {
+                const lAlpha = baseAlpha * lay.alphaMul;
+                if (lAlpha < 0.02) continue;
+                ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${lAlpha.toFixed(3)})`;
+                ctx.lineWidth = Math.max(0.4, lineW * lay.lineMul);
+                ctx.beginPath();
+                for (let i = 0; i <= SEGMENTS; i++) {
+                    const a = (i / SEGMENTS) * Math.PI * 2;
+                    // Organic wobble — two sines at different multiples.
+                    const wob = Math.sin(a * 3 + phase) * wobbleA
+                              + Math.sin(a * 7 + phase * 0.7) * wobbleB;
+                    // Doppler asymmetric bias — cos(a - motionAngle) is +1
+                    // exactly in motion direction, -1 directly behind. We
+                    // SUBTRACT from radius in motion direction (compress)
+                    // and ADD behind (stretch) — wave gets pushed forward
+                    // visually.
+                    const dopp = moving ? -Math.cos(a - motionAngle) * dopplerK : 0;
+                    let rad = (radius + wob + dopp) * lay.scale;
+                    if (rad < 1) rad = 1;
+                    const x = r.x + Math.cos(a) * rad;
+                    const y = r.y + Math.sin(a) * rad * PERSPECTIVE_Y;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else         ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            }
         }
     }
 
@@ -852,6 +931,10 @@
             born: performance.now(),
             duration: COLLISION.burstDurationMs,
             maxR: COLLISION.maxRadius,
+            // Random rotation for the cross-wave shimmer arcs so successive
+            // bursts in the same area don't all align — keeps the
+            // interference cue from feeling stamped.
+            phase: Math.random() * Math.PI,
         });
         // Micro-particles around the burst — a tiny dust of the blended
         // colour. They ride in activeParticles with role='blend' so they
@@ -978,6 +1061,24 @@
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, baseR * 1.2, 0, Math.PI * 2);
                 ctx.stroke();
+            }
+            // Cross-wave shimmer — 2 short arcs perpendicular to each
+            // other near the burst centre. Peaks mid-life (sin(t·π)) and
+            // fades. Suggests interference geometry rather than just
+            // concentric ripples. Rotation is per-burst (b.phase) so
+            // successive bursts in the same area don't all align.
+            const shimmer = Math.sin(t * Math.PI) * peak * 0.7;
+            if (shimmer > 0.04) {
+                const shR = baseR * 0.42;
+                const arcSpan = Math.PI * 0.55;     // ~99° arc per stroke
+                ctx.strokeStyle = `rgba(${col},${shimmer.toFixed(3)})`;
+                ctx.lineWidth = 1.1;
+                for (let s = 0; s < 2; s++) {
+                    const a0 = (b.phase || 0) + s * (Math.PI / 2);
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, shR, a0, a0 + arcSpan);
+                    ctx.stroke();
+                }
             }
         }
     }
@@ -1571,25 +1672,30 @@
             if (showTouchpad) updateTouchpadDot();
         }
 
-        // Quiet side panels — host-only, dead-room-only. Hidden on narrow
-        // viewports via CSS @media (1100px). Updated from broadcast each
-        // state push so participant dots / round indicator stay live.
-        const showSidePanels = myRole === 'host' && experienceStage === 'dead-room';
-        if (hudSideLeft)  hudSideLeft.classList.toggle('hidden',  !showSidePanels);
-        if (hudSideRight) hudSideRight.classList.toggle('hidden', !showSidePanels);
-        if (showSidePanels) {
-            // Left panel: mode name + meaning.
+        // Side panels are dead-room only. Three mutually-exclusive visibilities:
+        //   • host  → hudSideLeft (mode overview)   + hudSideRight (players)
+        //   • player→ hudSidePlayer (own identity)
+        //   • none of the above → all hidden
+        // CSS @media hides everything below 1100px viewport regardless.
+        const inDeadRoom = experienceStage === 'dead-room';
+        const showHostSide   = myRole === 'host' && inDeadRoom;
+        const showPlayerSide = !!myRole && myRole !== 'host' && inDeadRoom;
+        if (hudSideLeft)   hudSideLeft.classList.toggle('hidden',   !showHostSide);
+        if (hudSideRight)  hudSideRight.classList.toggle('hidden',  !showHostSide);
+        if (hudSidePlayer) hudSidePlayer.classList.toggle('hidden', !showPlayerSide);
+
+        if (showHostSide) {
+            // Host LEFT: mode meaning.
             if (sideModeName) sideModeName.textContent = gameMode === 'accumulate' ? 'Fill Mode' : 'Live Mix';
             if (sideModeText) sideModeText.textContent = gameMode === 'accumulate'
                 ? 'The room remembers where sound has been'
                 : 'The room listens to the present';
-            // Right panel: per-role connection state.
+            // Host RIGHT: per-role connection state.
             for (const role of ROLES) {
                 const el = sidePlayerEls[role];
                 if (!el) continue;
                 el.classList.toggle('is-offline', !connectedPlayers.includes(role));
             }
-            // Round indicator.
             if (sideRoundLbl) {
                 const idx = Number.isFinite(s.roundIndex) ? s.roundIndex + 1 : '—';
                 const tot = Number.isFinite(s.totalRounds) ? s.totalRounds : '—';
@@ -1597,6 +1703,41 @@
             }
             if (sideRoundKind) {
                 sideRoundKind.textContent = (currentRound && KIND_LABELS[currentRound.kind]) || '—';
+            }
+        }
+        if (showPlayerSide) {
+            // Player panel: their colour, mode meaning, round + instruction,
+            // and live mic state. Colour driven by myRole.
+            if (playerSwatchEl) {
+                playerSwatchEl.classList.remove('player-identity-swatch--red',
+                    'player-identity-swatch--green', 'player-identity-swatch--blue');
+                playerSwatchEl.classList.add(`player-identity-swatch--${myRole}`);
+            }
+            if (playerNameEl) playerNameEl.textContent = myRole.toUpperCase();
+            if (playerSideMode)    playerSideMode.textContent = gameMode === 'accumulate' ? 'Fill Mode' : 'Live Mix';
+            if (playerSideModeTxt) playerSideModeTxt.textContent = gameMode === 'accumulate'
+                ? 'The room remembers where sound has been'
+                : 'The room listens to the present';
+            if (playerSideKind) {
+                playerSideKind.textContent = (currentRound && KIND_LABELS[currentRound.kind]) || '—';
+            }
+            if (playerSideInstr) {
+                playerSideInstr.textContent = (currentRound && currentRound.instruction) || '—';
+            }
+            // Mic state — derived from this client's mic capture, not from
+            // the server frame (which carries smoothed volume only).
+            if (playerSideMic) {
+                let state = 'no mic', cls = 'is-quiet';
+                if (analyser && audioCtx && audioCtx.state === 'running') {
+                    const raw = getVolumeRaw();
+                    if (raw < 0.005)      { state = 'silent';      cls = 'is-quiet'; }
+                    else if (raw < 0.020) { state = 'listening…';  cls = 'is-listening'; }
+                    else if (raw < 0.080) { state = 'speaking';    cls = 'is-speaking'; }
+                    else                  { state = 'loud';        cls = 'is-speaking'; }
+                }
+                playerSideMic.textContent = state;
+                playerSideMic.classList.remove('is-quiet', 'is-listening', 'is-speaking');
+                playerSideMic.classList.add(cls);
             }
         }
 

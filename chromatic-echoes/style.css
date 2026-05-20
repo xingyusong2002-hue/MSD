@@ -1620,46 +1620,59 @@ body {
     position: fixed;
     top: 50%;
     transform: translateY(-50%);
-    width: 200px;
+    width: 260px;             /* was 200 — wider for bigger type */
     z-index: 5;
     pointer-events: none;
     font-family: var(--font-body);
-    opacity: 0.85;
+    opacity: 1;               /* opacity now lives on individual cards */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    scrollbar-width: none;     /* Firefox */
 }
+.hud-side::-webkit-scrollbar { display: none; }
 .hud-side--left {
-    left: 30px;
+    left: 26px;
     text-align: left;
 }
 .hud-side--right {
-    right: 30px;
+    right: 26px;
     text-align: right;
 }
+/* Each section is now a subtle glass card — clearer grouping than the
+   previous "floating text" approach, but still warm-brown and quiet
+   enough that it doesn't compete with the central room. */
 .hud-side-section {
-    margin-bottom: 28px;
-}
-.hud-side-section:last-child {
-    margin-bottom: 0;
+    background: oklch(15% 0.020 45 / 0.55);
+    border: 1px solid oklch(60% 0.030 50 / 0.15);
+    border-radius: 14px;
+    padding: 14px 16px;
+    backdrop-filter: blur(10px);
+    margin: 0;
 }
 .hud-side-label {
-    font-size: 0.60rem;
-    letter-spacing: 0.22em;
+    font-size: 0.74rem;        /* was 0.60 — ~23% larger */
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: oklch(58% 0.020 50);
-    margin: 0 0 8px;
+    color: oklch(68% 0.020 50);
+    margin: 0 0 10px;
     font-weight: 500;
 }
 .hud-side-title {
     font-family: var(--font-display);
-    font-size: 1.05rem;
-    color: oklch(82% 0.020 55);
-    letter-spacing: 0.05em;
-    margin: 0 0 4px;
+    font-size: 1.32rem;        /* was 1.05 — ~26% larger */
+    color: oklch(90% 0.025 55);
+    letter-spacing: 0.04em;
+    margin: 0 0 6px;
     font-weight: 400;
+    line-height: 1.2;
 }
 .hud-side-text {
-    font-size: 0.74rem;
-    line-height: 1.55;
-    color: oklch(68% 0.015 55);
+    font-size: 0.92rem;        /* was 0.74 — ~24% larger */
+    line-height: 1.5;
+    color: oklch(76% 0.020 55);
     margin: 0;
 }
 .hud-side-players {
@@ -1668,29 +1681,73 @@ body {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
 }
 .hud-side--left .hud-side-players { align-items: flex-start; }
 .hud-side--right .hud-side-players { align-items: flex-end; }
 .hud-side-player {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.78rem;
-    color: oklch(68% 0.015 55);
+    gap: 12px;
+    font-size: 0.98rem;        /* was 0.78 — ~26% larger */
+    color: oklch(78% 0.020 55);
     transition: opacity 0.25s ease;
 }
-.hud-side-player.is-offline { opacity: 0.35; }
+.hud-side-player.is-offline { opacity: 0.32; }
 .hud-side--right .hud-side-player { flex-direction: row-reverse; }
 .hud-side-dot {
-    width: 10px;
-    height: 10px;
+    width: 14px;               /* was 10 */
+    height: 14px;
     border-radius: 50%;
-    box-shadow: 0 0 6px currentColor;
+    box-shadow: 0 0 8px currentColor;
 }
 .hud-side-dot--red   { background: oklch(65% 0.22 25);  color: oklch(65% 0.22 25);  }
 .hud-side-dot--green { background: oklch(85% 0.20 155); color: oklch(85% 0.20 155); }
 .hud-side-dot--blue  { background: oklch(65% 0.18 250); color: oklch(65% 0.18 250); }
+
+/* Player identity card — bigger swatch + "YOU ARE RED" text, so a phone
+   player on a hosted laptop tab knows their role at a glance. */
+.player-identity-card {
+    padding-bottom: 18px;
+}
+.player-identity-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.player-identity-swatch {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: oklch(50% 0.05 50);
+    box-shadow: 0 0 18px currentColor, inset 0 0 0 1px oklch(100% 0 0 / 0.18);
+    color: oklch(50% 0.05 50);
+    transition: background 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+}
+.player-identity-swatch--red {
+    background: oklch(65% 0.22 25);
+    color: oklch(65% 0.22 25);
+}
+.player-identity-swatch--green {
+    background: oklch(85% 0.20 155);
+    color: oklch(85% 0.20 155);
+}
+.player-identity-swatch--blue {
+    background: oklch(65% 0.18 250);
+    color: oklch(65% 0.18 250);
+}
+.player-identity-name {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    letter-spacing: 0.14em;
+    color: oklch(92% 0.025 55);
+    font-weight: 400;
+}
+/* Microphone state pill colours — quiet → muted brown; listening → calm
+   warm cream; speaking → role-coloured glow. Updated each frame in JS. */
+#playerSideMicState.is-quiet     { color: oklch(60% 0.012 55); font-style: italic; }
+#playerSideMicState.is-listening { color: oklch(78% 0.020 55); }
+#playerSideMicState.is-speaking  { color: oklch(90% 0.035 55); font-weight: 500; letter-spacing: 0.03em; }
 
 /* Hide on narrow viewports — the room itself takes priority. */
 @media (max-width: 1100px) {

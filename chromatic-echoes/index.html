@@ -311,6 +311,35 @@ ngrok http 8080</code></pre>
                 <p class="hud-side-text">Speak · hum · clap · whisper · move while sounding</p>
             </div>
         </aside>
+        <!-- Player identity side panel — shown to a player (non-host) instead
+             of the host's overview panels. Contains: a big coloured swatch
+             + "YOU ARE RED/GREEN/BLUE", current mode meaning, this-round
+             instruction, and microphone state. Sits on the LEFT side so it
+             doesn't collide with the right-side touchpad. -->
+        <aside id="hudSidePlayer" class="hud-side hud-side--left hidden">
+            <div class="hud-side-section player-identity-card">
+                <p class="hud-side-label">You are</p>
+                <div class="player-identity-row">
+                    <span id="playerIdentitySwatch" class="player-identity-swatch"></span>
+                    <span id="playerIdentityName" class="player-identity-name">—</span>
+                </div>
+            </div>
+            <div class="hud-side-section">
+                <p class="hud-side-label">Mode</p>
+                <p class="hud-side-title" id="playerSideModeName">Live Mix</p>
+                <p class="hud-side-text" id="playerSideModeText">The room listens to the present</p>
+            </div>
+            <div class="hud-side-section">
+                <p class="hud-side-label">This round</p>
+                <p class="hud-side-title" id="playerSideRoundKind">—</p>
+                <p class="hud-side-text" id="playerSideInstruction">—</p>
+            </div>
+            <div class="hud-side-section">
+                <p class="hud-side-label">Microphone</p>
+                <p class="hud-side-text" id="playerSideMicState">listening…</p>
+            </div>
+        </aside>
+
         <aside id="hudSideRight" class="hud-side hud-side--right hidden">
             <div class="hud-side-section">
                 <p class="hud-side-label">Players</p>
