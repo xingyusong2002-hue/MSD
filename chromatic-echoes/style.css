@@ -461,11 +461,27 @@ body {
     font-style: italic;
 }
 
+/* ============================================================
+   TOP HUD LAYOUT — two-row safe-zone system
+   ------------------------------------------------------------
+   Row 1 (top: 14px):   mode-badge · exit · | round-instruction | · round-badge · conn-status
+   Row 2 (top: 62px):   back-to-lobby · clear-fill ·  ......  · stage-toolbar
+
+   Each top-anchored element gets its position re-declared in this
+   block so the only place to reason about HUD collisions is here.
+   Width assumptions (1366px laptop):
+     left lane row 1   : ~210px  (mode-badge + exit)
+     left lane row 2   : ~280px  (back-to-lobby + clear-fill, host only)
+     right lane row 1  : ~260px  (round-badge + conn-status)
+     right lane row 2  : ~430px  (stage-toolbar, host only)
+     centre instruction: max-width clamped via calc(100vw - 600px)
+   ============================================================ */
+
 /* ---- Mode Badge (in-game) ---- */
 .mode-badge {
     position: fixed;
-    top: 24px;
-    left: 24px;
+    top: 14px;
+    left: 14px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1071,8 +1087,10 @@ body {
 /* Round badge */
 .round-badge {
     position: fixed;
-    top: 24px;
-    right: 24px;
+    top: 14px;
+    /* sits left of conn-status (conn-status is ~14px from right + ~145px wide
+       + 12px gap → start round-badge at right: 171px). */
+    right: 171px;
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
     border: 1px solid var(--glass-border);
@@ -1462,14 +1480,16 @@ body {
     font-weight: 500;
 }
 
-/* Secondary screen-back: sits next to the primary one (left side, but shifted
-   right so they don't overlap). Used for the host's "Back to lobby ↺" button
-   inside the game HUD. */
+/* Secondary + tertiary screen-back buttons drop to row 2 of the HUD so
+   they never compete for the same row as the primary. Row 1 stays a
+   clean indicator strip; row 2 carries the host's transient controls. */
 .screen-back--secondary {
-    left: 170px;
+    top: 62px;            /* row 2 — Back to lobby ↺ */
+    left: 14px;
 }
 .screen-back--tertiary {
-    left: 330px;          /* offset from the Back-to-lobby button */
+    top: 62px;            /* row 2 — Clear Fill, next to secondary */
+    left: 158px;
 }
 
 /* ---- Connection-status indicator ----
@@ -1518,6 +1538,55 @@ body {
 @keyframes connPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+/* ============================================================
+   TOP HUD — responsive shrink rules
+   Three breakpoints. Phones in portrait (~390px) only ever show
+   mode-badge + round-instruction + conn-status (the other top-area
+   elements are host-only) so we focus on shrinking those.
+   ============================================================ */
+@media (max-width: 900px) {
+    .round-instruction {
+        font-size: 0.78rem;
+        max-width: min(280px, calc(100vw - 460px));
+        padding: 6px 14px;
+    }
+    .stage-toolbar {
+        font-size: 0.7rem;
+        padding: 4px 8px;
+    }
+    .stage-toolbar-btn { padding: 5px 10px; }
+    /* Round badge becomes redundant — the round name lives in the
+       instruction pill already. Hide it to free row 1 width. */
+    .round-badge { display: none; }
+    .conn-status { font-size: 0.66rem; padding: 5px 10px; }
+}
+@media (max-width: 720px) {
+    .round-instruction {
+        font-size: 0.72rem;
+        max-width: min(220px, calc(100vw - 280px));
+    }
+    /* The mode-badge name + icon can shrink, exit button text wraps off. */
+    .mode-badge { font-size: 0.66rem; padding: 6px 12px; }
+    .screen-back { font-size: 0.74rem; padding: 6px 14px; left: 118px; }
+    .screen-back--secondary { left: 14px; top: 56px; }
+    .screen-back--tertiary  { left: 142px; top: 56px; }
+}
+@media (max-width: 560px) {
+    /* On very small screens, stack the centre instruction onto row 2 so
+       it doesn't compete with the tighter edge clusters at all. */
+    .round-instruction {
+        top: 56px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 86vw;
+    }
+    /* And drop the stage-toolbar to row 3 since the instruction sits
+       below row 1 now. Host-only anyway; players won't see this. */
+    .stage-toolbar { top: 100px; }
+    .screen-back--secondary,
+    .screen-back--tertiary { top: 100px; }
 }
 
 /* ---- Live microphone meter (player wait screen) ----
@@ -1635,10 +1704,12 @@ body {
 }
 
 /* Back-to-start button — anchored top-left of any screen that opts in. */
+/* Primary screen-back ("← Exit to start"). Lives on row 1 left, immediately
+   to the right of the mode-badge so the two read as a single left cluster. */
 .screen-back {
     position: absolute;
-    top: 22px;
-    left: 22px;
+    top: 14px;
+    left: 132px;      /* mode-badge is ~108px wide + 10px gap */
     z-index: 10;
     padding: 8px 18px;
     font-size: 0.85rem;
@@ -1659,10 +1730,12 @@ body {
     margin: 0;
 }
 
-/* Floating host-only stage toolbar (visible inside the dead-room stage). */
+/* Floating host-only stage toolbar (visible inside the dead-room stage).
+   Sits on row 2 of the HUD, anchored to the right edge — leaves row 1 for
+   the round-badge + conn-status indicator pair. */
 .stage-toolbar {
     position: fixed;
-    top: 14px;
+    top: 62px;
     right: 14px;
     z-index: 200;
     display: flex;
@@ -1714,7 +1787,7 @@ body {
 /* Per-round instruction strip (sits inside #gameHud near the top centre). */
 .round-instruction {
     position: absolute;
-    top: 18px;
+    top: 14px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -1727,8 +1800,19 @@ body {
     backdrop-filter: var(--glass-blur);
     font-size: 0.9rem;
     color: var(--color-text);
-    max-width: min(640px, 90vw);
+    /* Reserve ~300px on each side for the left/right HUD lanes so the
+       instruction never overruns the mode-badge/Exit or the round-badge/
+       conn-status clusters. Falls back to 90vw on very narrow screens
+       where the lanes themselves shrink (see media queries below). */
+    max-width: min(420px, calc(100vw - 600px));
     pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.round-instruction .round-instruction-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .round-kind-tag {

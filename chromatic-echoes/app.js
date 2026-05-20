@@ -392,54 +392,86 @@
         ctx.lineWidth = 1.6;
         ctx.stroke();
 
-        // 3. Repeated triangular wedges inward along each edge.
-        // The wedge fill is the mid-tone foam colour. Each wedge's
-        // protrusion length shimmers with a per-wedge sine offset so the
-        // boundary doesn't look like a rigid sawtooth — small, organic.
-        const wedgeBase = 9;          // half-width along the edge
-        const wedgeDepth = 10;        // depth toward the room interior
-        const wedgeSpacing = 24;      // distance between wedge centres
-        ctx.fillStyle = `rgba(120, 105, 80, ${(breath * 1.4).toFixed(3)})`;
+        // 3. Repeated ROUNDED foam bumps along each edge — previously sharp
+        // triangular wedges read as "teeth"; the new shape is a flat-topped
+        // cubic-Bezier bump that reads as padded acoustic foam. Each bump
+        // shimmers with its own sine offset so the boundary stays organic.
+        //
+        // Why cubic Bezier (bezierCurveTo) and not quadratic:
+        //   quadratic with one control point always parabolic → pointy apex.
+        //   cubic with two control points pushed inward at equal depth →
+        //   flat apex + smoothly rolling shoulders. Same draw cost; vastly
+        //   softer read.
+        const wedgeBase = 14;         // half-width along the edge (was 9 — wider/softer)
+        const wedgeDepth = 7;         // depth into the room (was 10 — shallower)
+        const wedgeSpacing = 30;      // gap between bump centres (was 24)
+        ctx.fillStyle = `rgba(120, 105, 80, ${(breath * 1.0).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(155, 138, 105, ${(breath * 0.45).toFixed(3)})`;
+        ctx.lineWidth = 0.8;          // very subtle outline = highlight at top of foam
 
-        // Top edge — wedges point DOWN into the room
+        // Drawing one rounded bump is the same recipe four ways — only the
+        // axis flips. Wrap it so the four edge-loops stay readable.
+        // edge: 'top' | 'bottom' | 'left' | 'right'
+        // c: position along the edge; d: shimmer-adjusted depth.
+        function drawFoamBump(edge, c, d) {
+            // Control points pulled inward at FULL depth (not half) so the
+            // apex is flat for a chunk in the middle — that's what reads
+            // as "padded" rather than "pointed".
+            const cpFrac = 0.55;
+            ctx.beginPath();
+            if (edge === 'top') {
+                ctx.moveTo(c - wedgeBase, b.top);
+                ctx.bezierCurveTo(
+                    c - wedgeBase * cpFrac, b.top + d,
+                    c + wedgeBase * cpFrac, b.top + d,
+                    c + wedgeBase,          b.top
+                );
+            } else if (edge === 'bottom') {
+                ctx.moveTo(c - wedgeBase, b.bottom);
+                ctx.bezierCurveTo(
+                    c - wedgeBase * cpFrac, b.bottom - d,
+                    c + wedgeBase * cpFrac, b.bottom - d,
+                    c + wedgeBase,          b.bottom
+                );
+            } else if (edge === 'left') {
+                ctx.moveTo(b.left, c - wedgeBase);
+                ctx.bezierCurveTo(
+                    b.left + d, c - wedgeBase * cpFrac,
+                    b.left + d, c + wedgeBase * cpFrac,
+                    b.left,     c + wedgeBase
+                );
+            } else { // right
+                ctx.moveTo(b.right, c - wedgeBase);
+                ctx.bezierCurveTo(
+                    b.right - d, c - wedgeBase * cpFrac,
+                    b.right - d, c + wedgeBase * cpFrac,
+                    b.right,     c + wedgeBase
+                );
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        // Top edge — bumps protrude DOWN
         for (let x = b.left + wedgeSpacing * 0.7; x < b.right - wedgeSpacing * 0.4; x += wedgeSpacing) {
             const shimmer = 1 + 0.18 * Math.sin(tickPhase + x * 0.045);
-            ctx.beginPath();
-            ctx.moveTo(x - wedgeBase, b.top);
-            ctx.lineTo(x + wedgeBase, b.top);
-            ctx.lineTo(x,             b.top + wedgeDepth * shimmer);
-            ctx.closePath();
-            ctx.fill();
+            drawFoamBump('top', x, wedgeDepth * shimmer);
         }
-        // Bottom edge — wedges point UP into the room
+        // Bottom edge — bumps protrude UP
         for (let x = b.left + wedgeSpacing * 0.7; x < b.right - wedgeSpacing * 0.4; x += wedgeSpacing) {
             const shimmer = 1 + 0.18 * Math.sin(tickPhase + x * 0.045 + 1.7);
-            ctx.beginPath();
-            ctx.moveTo(x - wedgeBase, b.bottom);
-            ctx.lineTo(x + wedgeBase, b.bottom);
-            ctx.lineTo(x,             b.bottom - wedgeDepth * shimmer);
-            ctx.closePath();
-            ctx.fill();
+            drawFoamBump('bottom', x, wedgeDepth * shimmer);
         }
-        // Left edge — wedges point RIGHT into the room
+        // Left edge — bumps protrude RIGHT
         for (let y = b.top + wedgeSpacing * 0.7; y < b.bottom - wedgeSpacing * 0.4; y += wedgeSpacing) {
             const shimmer = 1 + 0.18 * Math.sin(tickPhase + y * 0.045 + 2.9);
-            ctx.beginPath();
-            ctx.moveTo(b.left, y - wedgeBase);
-            ctx.lineTo(b.left, y + wedgeBase);
-            ctx.lineTo(b.left + wedgeDepth * shimmer, y);
-            ctx.closePath();
-            ctx.fill();
+            drawFoamBump('left', y, wedgeDepth * shimmer);
         }
-        // Right edge — wedges point LEFT into the room
+        // Right edge — bumps protrude LEFT
         for (let y = b.top + wedgeSpacing * 0.7; y < b.bottom - wedgeSpacing * 0.4; y += wedgeSpacing) {
             const shimmer = 1 + 0.18 * Math.sin(tickPhase + y * 0.045 + 4.3);
-            ctx.beginPath();
-            ctx.moveTo(b.right, y - wedgeBase);
-            ctx.lineTo(b.right, y + wedgeBase);
-            ctx.lineTo(b.right - wedgeDepth * shimmer, y);
-            ctx.closePath();
-            ctx.fill();
+            drawFoamBump('right', y, wedgeDepth * shimmer);
         }
 
         // 4. A faint outer "shadow" behind the foam, 3px out from the
