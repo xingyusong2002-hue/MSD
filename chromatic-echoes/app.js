@@ -225,8 +225,17 @@
             particleLifeMul: 1.80,      // particles linger
             ringLifeMul: 1.35,          // rings travel further over time
             paintField: true,
-            paintFieldAlpha: 0.035,     // very soft so it builds up
-            paintFieldRadius: 64,       // blob size at threshold volume
+            // Much softer than before (was 0.035) — accumulation should
+            // build gradually over many stamps, not slap down opaque
+            // patches. Threshold for "trace memory, not paint splatter".
+            paintFieldAlpha: 0.014,
+            paintFieldRadius: 50,       // smaller than before (was 64)
+            // Per-frame soft decay applied to the paint canvas. Without
+            // this, paint at very-low alpha would still eventually saturate
+            // after a long round. With it, the memory has a half-life:
+            // every ~3 seconds, old paint drops to ~half intensity.
+            // alpha = 1 − (1 − decay)^frames so this value is per-frame.
+            paintCanvasDecay: 0.0024,
         },
     };
     function getModeConfig() {
@@ -539,20 +548,42 @@
         paintCtx.restore();
     }
     // Stamp a soft radial blob at (x, y) on the paint canvas, in role colour.
-    function stampPaint(x, y, color, volume) {
-        const blobR = 70 + volume * 60;
-        // Higher alpha than the previous main-canvas stamp because this
-        // layer does NOT get the main canvas's trail fade — colour builds.
-        const alpha = 0.045 + volume * 0.08;
+    // Trace-memory aesthetic: each stamp is gentle; the EFFECT comes from
+    // many stamps accumulating, not from one heavy splat. Motion-aware:
+    // when the source is moving fast, stamps shrink so they form a thin
+    // path rather than a wide smear. Stationary sound = soft aura at the
+    // anchor; moving sound = soft trail along the path.
+    //
+    // Gradient now has FOUR stops with aggressive falloff: most of the
+    // visible area is in the outer 50% of the radius, fading to fully
+    // transparent at the edge. This is what makes the stamp read as a
+    // soft glow rather than a filled disc.
+    function stampPaint(x, y, color, volume, motionSpeedPx) {
+        const speed = motionSpeedPx || 0;
+        // Motion factor: 0 stationary → ~1 at moderate movement
+        const motionNorm = Math.min(1, speed / 5);
+        // Radius shrinks with motion so the trail is thin, not a smear.
+        // Base value lower than before; volume bumps it slightly.
+        const blobR = (CONFIG_PAINT_BASE_RADIUS + volume * 24) * (1 - motionNorm * 0.42);
+        // Alpha tuned MUCH softer; volume contribution kept small so loud
+        // doesn't spike the stamp into a paint blob — even Loud should
+        // feel like a brighter glow, not a paint mark.
+        const alpha = CONFIG_PAINT_BASE_ALPHA + volume * 0.020;
+        const col = `${color.r},${color.g},${color.b}`;
         const grad = paintCtx.createRadialGradient(x, y, 0, x, y, blobR);
-        grad.addColorStop(0,   `rgba(${color.r},${color.g},${color.b},${alpha.toFixed(3)})`);
-        grad.addColorStop(0.6, `rgba(${color.r},${color.g},${color.b},${(alpha * 0.4).toFixed(3)})`);
-        grad.addColorStop(1,   `rgba(${color.r},${color.g},${color.b},0)`);
+        grad.addColorStop(0,    `rgba(${col},${alpha.toFixed(3)})`);
+        grad.addColorStop(0.35, `rgba(${col},${(alpha * 0.50).toFixed(3)})`);
+        grad.addColorStop(0.70, `rgba(${col},${(alpha * 0.15).toFixed(3)})`);
+        grad.addColorStop(1,    `rgba(${col},0)`);
         paintCtx.fillStyle = grad;
         paintCtx.beginPath();
         paintCtx.arc(x, y, blobR, 0, Math.PI * 2);
         paintCtx.fill();
     }
+    // Defaults read from MODE_CONFIG at call time so it picks up tuning
+    // changes immediately. (Helpers below avoid re-looking-up each frame.)
+    const CONFIG_PAINT_BASE_RADIUS = 50;
+    const CONFIG_PAINT_BASE_ALPHA  = 0.014;
     // Slow erase used by Live Mix to clear leftover paint from a previous
     // Fill Mode round. Uses destination-out so it removes colour rather
     // than darkening it. Alpha is small — clears in ~2-3 s.
@@ -1083,17 +1114,27 @@
         }
     }
 
-    // ---- Wave-to-wave interference (ring intersections, not particles) ----
-    // Previous collision system detected PARTICLE-PARTICLE overlap. That
-    // works when particles cross but misses the bigger event — the
-    // wavefronts (rings) themselves intersecting. This system listens for
-    // CONTACT SEAM between two sound fields. The previous version drew
-    // concentric arcs around a centre dot, which the user noted reads as a
-    // Wi-Fi / warning icon. The structural fix: draw a SHORT LINE SEGMENT
-    // along the contact area between sources, not a *point with radiating
-    // arcs*. A contact line can't read as an icon — it has no centre
-    // punctuation and no radial symmetry; it is literally "a border between
-    // two regions", which is what wave interference physically *is*.
+    // ---- Wave-field interaction (no standalone object) ----
+    // History of this slot:
+    //   v1 — concentric arcs + centre dot → read as Wi-Fi icon
+    //   v2 — wavy contact seam between sources → still read as a
+    //        "thing placed in the middle"
+    //   v3 (now) — NO midpoint marker at all. Instead, when two sources
+    //              are close + both speaking, we deform the existing
+    //              wavefields: partial arcs ATTACHED TO each source
+    //              (centred on it, facing the other), plus a soft
+    //              elongated overlap field oriented along the centres
+    //              axis. The interaction reads as "these two fields are
+    //              pressing into each other" rather than "an icon is
+    //              drawn between these dots".
+    //
+    // No event list, no per-frame spawning, no cooldown — the deformation
+    // is a function of CURRENT state, drawn every frame the condition
+    // holds. Effects are continuous rather than discrete, which is what
+    // physical interference would actually look like.
+    //
+    // Total cost is bounded: ≤3 role pairs × ≤(arcs + ellipse). For three
+    // roles this is at most 9 arc-strokes + 3 ellipses per frame.
     //
     // Detection trigger: source-source proximity + both above the visual
     // threshold (not ring-ring intersection, which fires only at the
@@ -1106,174 +1147,156 @@
     // poly-line drawn along that perpendicular axis, tapered at the
     // endpoints, with a sine wobble. Three parallel lines slightly offset
     // along the centres-axis suggest compressed contour bands.
+    // Tunables for the field-deformation visual.
     const INTERFERENCE = {
-        cooldownMs: 180,           // per-pair cooldown — bursts at most ~5/s
-        maxEventsPerFrame: 3,
-        duration: 600,             // 0.6 s fade — quick and elegant
-        proximityFactor: 0.55,     // overlap = within (ringTravel * factor)
-        proximityMin: 8,           // ignore sources almost overlapping
-        seamMaxLength: 92,         // hard cap on seam length (px)
-        seamLengthFromDist: 0.55,  // seamLen = min(cap, distance * this)
-        seamSegments: 16,          // poly-line resolution
-        seamWobbleAmp: 4.5,        // sine wobble peak amplitude (px)
-        seamLineCount: 3,          // 3 parallel contour bands
-        seamLineGap: 5.5,          // axis-direction offset between bands
-        peakAlphaMul: 0.78,
-        flickerHz: 7,
+        proximityFactor: 0.55,     // active when distance < ringTravel * this
+        proximityMin: 8,           // ignore sources nearly on top of each other
+        arcsPerSource: 3,          // 3 partial arcs per source on the facing side
+        arcBaseRadius: 38,         // radius of innermost arc (px); next layers add radialGap
+        arcRadialGap: 24,          // gap between concentric arcs (volume-modulated)
+        arcSpanMax: Math.PI * 0.65, // angular spread of innermost (widest) arc
+        arcSegments: 22,           // polyline resolution per arc
+        arcWobbleAmp: 1.6,         // sine wobble on arc radius (px)
+        baseAlpha: 0.55,           // peak alpha used for the brightest arc
+        overlapFieldAlpha: 0.16,   // peak alpha of the soft elongated oval
+        overlapLengthFactor: 0.42, // oval length = distance * factor
+        overlapWidthFactor:  0.20, // oval width  = distance * factor
     };
-    let activeInterferenceEvents = [];
-    const pairCooldowns = new Map();   // 'red-green' → performance.now()
-
-    function pairKey(a, b) {
-        return a < b ? `${a}-${b}` : `${b}-${a}`;
-    }
 
     function effectiveVolumeFor(role) {
         return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
     }
 
-    function spawnInterferenceSeam(roleA, roleB, srcA, srcB, volA, volB, dist) {
-        const colorA = COLORS[roleA], colorB = COLORS[roleB];
-        if (!colorA || !colorB || !srcA || !srcB) return;
+    // Soft elongated oval between the two sources, oriented along the
+    // centres-axis. Reads as "the space where the two fields overlap" —
+    // NOT as a circular blob at the midpoint, because it's an ellipse
+    // long-aligned with the source axis. Very low alpha so it's a tint,
+    // not a fill. Drawn with 'lighter' composite so it gently brightens
+    // wherever it overlaps the existing wavefronts.
+    function drawOverlapField(srcA, srcB, blend, intensity, dist) {
+        if (intensity < 0.04) return;
         const midX = (srcA.x + srcB.x) * 0.5;
         const midY = (srcA.y + srcB.y) * 0.5;
-        const axisAngle = Math.atan2(srcB.y - srcA.y, srcB.x - srcA.x);
-        // Seam length scales with proximity. Sources closer together =
-        // tighter seam; farther apart but still in proximity range = longer
-        // seam (the "contact zone" is wider when waves barely reach).
-        const seamLen = Math.min(
-            INTERFERENCE.seamMaxLength,
-            dist * INTERFERENCE.seamLengthFromDist
-        );
-        // Intensity scales with the QUIETER speaker — interference is only
-        // as strong as the weakest contributor. Plus proximity boost: the
-        // closer the sources, the stronger the perceived interference.
-        const quieter = Math.min(volA, volB);
-        const proxNorm = 1 - Math.min(1, dist / (CONFIG.ringTravel * INTERFERENCE.proximityFactor));
-        const intensity = Math.min(1, Math.max(0.3, quieter * (0.65 + 0.5 * proxNorm)));
-        activeInterferenceEvents.push({
-            midX, midY,
-            axisAngle,
-            seamLen,
-            intensity,
-            r: Math.round((colorA.r + colorB.r) / 2),
-            g: Math.round((colorA.g + colorB.g) / 2),
-            b: Math.round((colorA.b + colorB.b) / 2),
-            born: performance.now(),
-            duration: INTERFERENCE.duration,
-            phase: Math.random() * Math.PI * 2,
-        });
+        const dx = srcB.x - srcA.x, dy = srcB.y - srcA.y;
+        const angle = Math.atan2(dy, dx);
+        const lengthR = dist * INTERFERENCE.overlapLengthFactor;
+        const widthR  = dist * INTERFERENCE.overlapWidthFactor;
+        const alpha   = INTERFERENCE.overlapFieldAlpha * intensity;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.translate(midX, midY);
+        ctx.rotate(angle);
+        // Soft radial gradient stretched into an ellipse by canvas scale.
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, lengthR);
+        const col = `${blend.r},${blend.g},${blend.b}`;
+        grad.addColorStop(0,    `rgba(${col},${alpha.toFixed(3)})`);
+        grad.addColorStop(0.5,  `rgba(${col},${(alpha * 0.45).toFixed(3)})`);
+        grad.addColorStop(1,    `rgba(${col},0)`);
+        ctx.fillStyle = grad;
+        // Use ellipse natively rather than scaling, so the gradient stays
+        // circular relative to the ellipse — soft edges in every direction.
+        ctx.beginPath();
+        ctx.ellipse(0, 0, lengthR, widthR, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
     }
 
-    function detectInterferenceSeams() {
-        // Three roles → at most 3 pair checks per frame. Cheap.
-        const now = performance.now();
+    // Partial arcs ATTACHED to a source, opening toward `facingAngle`.
+    // These ARE NOT a separate object — they're a "compressed wavefront"
+    // appended to the source's existing aura. Three concentric arcs at
+    // increasing radii, narrowing in span (front-most arc is widest,
+    // outermost is narrowest), each with a small sine wobble on the
+    // radius so they read as deformations of the field, not as a UI ring.
+    function drawFacingArcs(src, facingAngle, blend, intensity) {
+        if (intensity < 0.04) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const col = `${blend.r},${blend.g},${blend.b}`;
+        const arcRadialGap = INTERFERENCE.arcRadialGap * (0.6 + 0.7 * intensity);
+        for (let i = 0; i < INTERFERENCE.arcsPerSource; i++) {
+            const radius = INTERFERENCE.arcBaseRadius + i * arcRadialGap;
+            // Wider arc closer to the source, narrower far out — gives
+            // the feel of a wavefront concentrated at the contact face.
+            const span = INTERFERENCE.arcSpanMax * (1 - i * 0.18);
+            const startA = facingAngle - span / 2;
+            const endA   = facingAngle + span / 2;
+            // Inner arcs brighter, outer arcs fainter.
+            const alpha = INTERFERENCE.baseAlpha * intensity * (1 - i * 0.28);
+            if (alpha < 0.03) continue;
+            ctx.strokeStyle = `rgba(${col},${alpha.toFixed(3)})`;
+            ctx.lineWidth = 1.4 - i * 0.30;
+            ctx.beginPath();
+            for (let s = 0; s <= INTERFERENCE.arcSegments; s++) {
+                const u = s / INTERFERENCE.arcSegments;
+                const a = startA + u * (endA - startA);
+                // Sine wobble on radius — flows slowly via `time` so the
+                // arcs breathe rather than freeze. Unique per arc index.
+                const wob = Math.sin(u * Math.PI * 3 + time * 1.5 + i * 0.7) * INTERFERENCE.arcWobbleAmp;
+                const r = radius + wob;
+                const x = src.x + Math.cos(a) * r;
+                // Same perspective y-scale as the main rings so the arcs
+                // sit on the same pseudo-3D plane.
+                const y = src.y + Math.sin(a) * r * PERSPECTIVE_Y;
+                if (s === 0) ctx.moveTo(x, y);
+                else         ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // Single pair: deform A's field on its B-facing side, deform B's
+    // field on its A-facing side, and tint the overlap zone in between.
+    function drawWaveFieldInteraction(roleA, roleB, srcA, srcB, volA, volB, dist) {
+        const colA = COLORS[roleA], colB = COLORS[roleB];
+        if (!colA || !colB) return;
+        const blend = {
+            r: Math.round((colA.r + colB.r) / 2),
+            g: Math.round((colA.g + colB.g) / 2),
+            b: Math.round((colA.b + colB.b) / 2),
+        };
+        const axisAngle = Math.atan2(srcB.y - srcA.y, srcB.x - srcA.x);
+        // Proximity scaling: 1 when sources nearly touching, 0 at the
+        // edge of the proximity range. Combined with the quieter speaker
+        // so a one-quiet pair contributes proportionally less.
+        const proxRadius = CONFIG.ringTravel * INTERFERENCE.proximityFactor + CONFIG.ringBaseRadius;
+        const proxNorm = 1 - Math.min(1, dist / proxRadius);
+        const quieter  = Math.min(volA, volB);
+        const intensity = Math.min(1, quieter * (0.5 + 0.8 * proxNorm));
+
+        // 1) Soft overlap field across the centres axis.
+        drawOverlapField(srcA, srcB, blend, intensity, dist);
+        // 2) Arcs attached to each source, opening toward the OTHER.
+        //    Source A's arcs open in axisAngle direction.
+        //    Source B's arcs open in axisAngle + π direction.
+        drawFacingArcs(srcA, axisAngle,            blend, intensity);
+        drawFacingArcs(srcB, axisAngle + Math.PI,  blend, intensity);
+    }
+
+    // Per-frame: walk role pairs, draw deformation where appropriate.
+    // No event list, no cooldown — the deformation is a function of the
+    // current state, so it appears whenever conditions hold and stops
+    // the instant they don't. ≤3 pairs for ROLES = R/G/B.
+    function drawWaveInteractions() {
         const T = CONFIG.volumeThresholdVisual;
         const proxRadius = CONFIG.ringTravel * INTERFERENCE.proximityFactor + CONFIG.ringBaseRadius;
-        let spawned = 0;
         for (let i = 0; i < ROLES.length; i++) {
             const a = ROLES[i];
             const volA = effectiveVolumeFor(a);
-            if (volA < T) continue;          // Task 5: silent player = no seam
+            if (volA < T) continue;
             for (let j = i + 1; j < ROLES.length; j++) {
                 const b = ROLES[j];
                 const volB = effectiveVolumeFor(b);
-                if (volB < T) continue;       // Task 5: BOTH must be active
+                if (volB < T) continue;
                 const srcA = sourcePositions[a], srcB = sourcePositions[b];
                 if (!srcA || !srcB) continue;
                 const dx = srcB.x - srcA.x, dy = srcB.y - srcA.y;
                 const d = Math.sqrt(dx * dx + dy * dy);
                 if (d < INTERFERENCE.proximityMin || d > proxRadius) continue;
-                // Per-pair cooldown.
-                const key = pairKey(a, b);
-                const lastAt = pairCooldowns.get(key) || 0;
-                if (now - lastAt < INTERFERENCE.cooldownMs) continue;
-                spawnInterferenceSeam(a, b, srcA, srcB, volA, volB, d);
-                pairCooldowns.set(key, now);
-                spawned++;
-                if (spawned >= INTERFERENCE.maxEventsPerFrame) return;
-            }
-        }
-        // Prune stale cooldowns (only 3 possible pairs, but be tidy).
-        if (pairCooldowns.size > 6) {
-            for (const [k, t] of pairCooldowns) {
-                if (now - t > INTERFERENCE.cooldownMs * 6) pairCooldowns.delete(k);
+                drawWaveFieldInteraction(a, b, srcA, srcB, volA, volB, d);
             }
         }
     }
-
-    function updateInterferenceSeams() {
-        const now = performance.now();
-        activeInterferenceEvents = activeInterferenceEvents.filter(
-            e => now - e.born < e.duration
-        );
-    }
-
-    function drawInterferenceSeams() {
-        const now = performance.now();
-        for (const ev of activeInterferenceEvents) {
-            const t = (now - ev.born) / ev.duration;
-            if (t < 0 || t > 1) continue;
-
-            // Alpha envelope: sin(t·π) peaks mid-life; flicker shimmer on top.
-            const env = Math.sin(t * Math.PI);
-            const flick = 0.85 + 0.18 * Math.sin(t * Math.PI * INTERFERENCE.flickerHz + ev.phase);
-            const peak  = env * flick * INTERFERENCE.peakAlphaMul * ev.intensity;
-            if (peak < 0.04) continue;
-
-            const col = `${ev.r},${ev.g},${ev.b}`;
-            // Axis vector = source-to-source direction; perp vector = ACROSS
-            // the gap, the direction the seam runs.
-            const axisX = Math.cos(ev.axisAngle);
-            const axisY = Math.sin(ev.axisAngle);
-            const perpX = -axisY;
-            const perpY =  axisX;
-            const halfLen = ev.seamLen * 0.5;
-
-            // Draw seamLineCount parallel wavy bands, slightly offset along
-            // the axis (toward and away from each source). Each band is a
-            // poly-line of seamSegments steps with sine wobble + endpoint
-            // taper so the seam fades to nothing at the tips.
-            for (let lineIdx = 0; lineIdx < INTERFERENCE.seamLineCount; lineIdx++) {
-                // Centre the bands around 0: e.g. for 3 lines, offsets -1, 0, +1
-                const lineCentred = lineIdx - (INTERFERENCE.seamLineCount - 1) * 0.5;
-                const lineAxialOffset = lineCentred * INTERFERENCE.seamLineGap;
-                // Outer bands fainter, thinner — gives the seam visual depth
-                // without putting a hard "centre line" the eye reads as UI.
-                const distFromCentre = Math.abs(lineCentred);
-                const bandAlpha = peak * (1 - distFromCentre * 0.30);
-                if (bandAlpha < 0.04) continue;
-                ctx.strokeStyle = `rgba(${col},${bandAlpha.toFixed(3)})`;
-                ctx.lineWidth = 1.6 - distFromCentre * 0.5;
-                ctx.beginPath();
-                for (let s = 0; s <= INTERFERENCE.seamSegments; s++) {
-                    const u = (s / INTERFERENCE.seamSegments - 0.5) * 2; // -1..1
-                    const seamPos = u * halfLen;
-                    // Endpoint taper — wobble + alpha pinch to 0 at |u|=1.
-                    const taper = 1 - Math.abs(u);
-                    // Two-frequency sine wobble = organic, not perfectly
-                    // sinusoidal. Phase + time → flows slightly during life.
-                    const wob =
-                        Math.sin(u * Math.PI * 2 + ev.phase + t * 4) * INTERFERENCE.seamWobbleAmp
-                        + Math.sin(u * Math.PI * 5 + ev.phase * 0.7) * (INTERFERENCE.seamWobbleAmp * 0.4);
-                    const wobble = wob * taper;
-                    // Position = midpoint + (seamPos along perp) + (offset along axis)
-                    const x = ev.midX + perpX * seamPos + axisX * (lineAxialOffset + wobble);
-                    const y = ev.midY + perpY * seamPos + axisY * (lineAxialOffset + wobble);
-                    if (s === 0) ctx.moveTo(x, y);
-                    else         ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-            }
-        }
-    }
-
-    // Back-compat aliases — the render loop used to call these names. Now
-    // they delegate to the seam system so the call sites don't need to
-    // change. The arc-cluster code above is fully replaced.
-    function detectWaveInterference() { detectInterferenceSeams(); }
-    function updateInterferenceEvents() { updateInterferenceSeams(); }
-    function drawInterferenceEvents() { drawInterferenceSeams(); }
 
     // Per-role phase offsets for the breathing animation. Thirds of 2π so
     // the three colours never pulse in lockstep — that lockstep would read
@@ -2243,18 +2266,28 @@
 
         // ---- Paint canvas (Fill Mode memory layer) ----
         // In Fill Mode: stamp each speaking source's colour onto the
-        // dedicated paint canvas. It persists across frames so movement
-        // leaves visible coloured paths.
-        // In Live Mix: don't stamp; instead, slowly erase any leftover
-        // paint from a previous Fill round so Live looks clean.
+        // dedicated paint canvas + apply a tiny per-frame decay so the
+        // memory has a slow half-life rather than building to saturation.
+        // Stamps are motion-aware (smaller when moving = thin trail).
+        // In Live Mix: don't stamp; instead, faster destination-out fade
+        // erases any leftover paint from a previous Fill round.
         if (mc.paintField) {
             for (const role of ROLES) {
                 const src = sourcePositions[role];
                 if (!src) continue;
                 const vol = Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
                 if (vol < CONFIG.volumeThresholdVisual) continue;
-                stampPaint(src.x, src.y, COLORS[role], vol);
+                // Velocity → motion-aware stamp size. Idle source = wider
+                // soft aura; moving source = narrower thin-trail stamp.
+                const v = roleVelocityScreen[role] || { x: 0, y: 0 };
+                const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
+                stampPaint(src.x, src.y, COLORS[role], vol, speedPx);
             }
+            // Subtle per-frame decay on the paint canvas itself. Without
+            // this, low-alpha stamps would still build to saturation over
+            // a long round. With it, the memory has a slow half-life
+            // (~3s) so old traces gently fade as new ones arrive.
+            if (mc.paintCanvasDecay) fadePaintCanvas(mc.paintCanvasDecay);
         } else {
             // Soft destination-out to clear lingering paint over a few seconds.
             fadePaintCanvas(0.04);
@@ -2297,21 +2330,18 @@
 
         // Rings, particles, collision bursts — all inside the clip.
         updateRings();
-        // Wave-to-wave interference (ring intersections, different roles).
-        // Detected BEFORE drawRings so the event marker can be drawn
-        // alongside the rings that produced it. The detect uses the same
-        // age-driven radii drawRings will use, so they're consistent.
-        detectWaveInterference();
         drawRings();
+        // Wave-field interaction (NOT a separate event). drawWaveInteractions
+        // checks current state every frame and deforms the existing
+        // wavefields where two roles are both active + close. Draws on
+        // TOP of rings so the deformation reads as a modification of the
+        // visible ripples, not as something sitting beneath them.
+        drawWaveInteractions();
         updateParticles();
-        // Collision detection (particle-particle) runs AFTER particle
-        // update so positions are current. Bursts + wave-interference
-        // events both draw INSIDE the room-clip region.
+        // Particle-particle collision bursts (small sparks at micro-meet).
         detectCollisions();
         updateCollisionBursts();
         drawCollisionBursts();
-        updateInterferenceEvents();
-        drawInterferenceEvents();
         drawParticles();
 
         ctx.restore();
