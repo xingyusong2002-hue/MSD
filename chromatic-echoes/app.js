@@ -1087,37 +1087,39 @@
     // Previous collision system detected PARTICLE-PARTICLE overlap. That
     // works when particles cross but misses the bigger event — the
     // wavefronts (rings) themselves intersecting. This system listens for
-    // ring-ring circle intersections directly and spawns short-lived
-    // "interference event" markers at the intersection mid-point.
+    // CONTACT SEAM between two sound fields. The previous version drew
+    // concentric arcs around a centre dot, which the user noted reads as a
+    // Wi-Fi / warning icon. The structural fix: draw a SHORT LINE SEGMENT
+    // along the contact area between sources, not a *point with radiating
+    // arcs*. A contact line can't read as an icon — it has no centre
+    // punctuation and no radial symmetry; it is literally "a border between
+    // two regions", which is what wave interference physically *is*.
     //
-    // Each frame we walk pairs of active rings (different roles only),
-    // compute their current radii from age, and test the standard circle-
-    // intersection condition:
-    //     |r1 - r2|  <  d  <  r1 + r2
-    // where d is the distance between ring centres. If true, the two
-    // wavefronts are crossing right now. We compute the intersection
-    // mid-point via the perpendicular-bisector formula:
-    //     a = (r1² - r2² + d²) / (2d)
-    //     mid = centre1 + (a/d) · (centre2 - centre1)
-    // and spawn an interference event there.
+    // Detection trigger: source-source proximity + both above the visual
+    // threshold (not ring-ring intersection, which fires only at the
+    // wave-meeting moment — the new design wants the seam present whenever
+    // the two fields are actually overlapping, which happens whenever both
+    // sources are speaking near each other).
     //
-    // Performance:
-    //   • Per-pair cooldown (220 ms) prevents the same role-pair spawning
-    //     more than ~5 events / second.
-    //   • Per-frame cap (4) prevents pile-ups when many rings are alive.
-    //   • Total per-frame cost ≈ O(rings²); rings are cooldown-bounded
-    //     so the worst case is ~40 rings = 1600 pair checks, each
-    //     extremely cheap.
+    // Geometry: at the midpoint between sources A and B, compute the
+    // perpendicular direction (across the gap). The seam is a wavy
+    // poly-line drawn along that perpendicular axis, tapered at the
+    // endpoints, with a sine wobble. Three parallel lines slightly offset
+    // along the centres-axis suggest compressed contour bands.
     const INTERFERENCE = {
-        cooldownMs: 220,           // per-pair cooldown
-        maxEventsPerFrame: 4,
-        duration: 750,             // 0.75 s fade
-        baseRadius: 16,            // arc radius at birth
-        radiusGrowth: 22,          // additional arc radius gained as t goes 0→1
-        arcsPerSide: 3,            // 3 arcs each side perpendicular to centres axis
-        arcRadialGap: 7,           // gap between concentric arcs
-        peakAlphaMul: 0.85,
-        flickerHz: 9,              // shimmer frequency (Hz-ish)
+        cooldownMs: 180,           // per-pair cooldown — bursts at most ~5/s
+        maxEventsPerFrame: 3,
+        duration: 600,             // 0.6 s fade — quick and elegant
+        proximityFactor: 0.55,     // overlap = within (ringTravel * factor)
+        proximityMin: 8,           // ignore sources almost overlapping
+        seamMaxLength: 92,         // hard cap on seam length (px)
+        seamLengthFromDist: 0.55,  // seamLen = min(cap, distance * this)
+        seamSegments: 16,          // poly-line resolution
+        seamWobbleAmp: 4.5,        // sine wobble peak amplitude (px)
+        seamLineCount: 3,          // 3 parallel contour bands
+        seamLineGap: 5.5,          // axis-direction offset between bands
+        peakAlphaMul: 0.78,
+        flickerHz: 7,
     };
     let activeInterferenceEvents = [];
     const pairCooldowns = new Map();   // 'red-green' → performance.now()
@@ -1126,125 +1128,152 @@
         return a < b ? `${a}-${b}` : `${b}-${a}`;
     }
 
-    function spawnInterferenceEvent(x, y, colorA, colorB, angle, intensity) {
-        // Blended colour — same recipe as collision burst (averages).
+    function effectiveVolumeFor(role) {
+        return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
+    }
+
+    function spawnInterferenceSeam(roleA, roleB, srcA, srcB, volA, volB, dist) {
+        const colorA = COLORS[roleA], colorB = COLORS[roleB];
+        if (!colorA || !colorB || !srcA || !srcB) return;
+        const midX = (srcA.x + srcB.x) * 0.5;
+        const midY = (srcA.y + srcB.y) * 0.5;
+        const axisAngle = Math.atan2(srcB.y - srcA.y, srcB.x - srcA.x);
+        // Seam length scales with proximity. Sources closer together =
+        // tighter seam; farther apart but still in proximity range = longer
+        // seam (the "contact zone" is wider when waves barely reach).
+        const seamLen = Math.min(
+            INTERFERENCE.seamMaxLength,
+            dist * INTERFERENCE.seamLengthFromDist
+        );
+        // Intensity scales with the QUIETER speaker — interference is only
+        // as strong as the weakest contributor. Plus proximity boost: the
+        // closer the sources, the stronger the perceived interference.
+        const quieter = Math.min(volA, volB);
+        const proxNorm = 1 - Math.min(1, dist / (CONFIG.ringTravel * INTERFERENCE.proximityFactor));
+        const intensity = Math.min(1, Math.max(0.3, quieter * (0.65 + 0.5 * proxNorm)));
         activeInterferenceEvents.push({
-            x, y,
+            midX, midY,
+            axisAngle,
+            seamLen,
+            intensity,
             r: Math.round((colorA.r + colorB.r) / 2),
             g: Math.round((colorA.g + colorB.g) / 2),
             b: Math.round((colorA.b + colorB.b) / 2),
-            angle,
-            intensity: Math.min(1, Math.max(0.4, intensity)),
             born: performance.now(),
             duration: INTERFERENCE.duration,
-            // Random phase so successive events don't shimmer in lockstep.
             phase: Math.random() * Math.PI * 2,
         });
     }
 
-    function detectWaveInterference() {
-        if (activeRings.length < 2) return;
+    function detectInterferenceSeams() {
+        // Three roles → at most 3 pair checks per frame. Cheap.
         const now = performance.now();
-        // Pre-compute each ring's current radius (in screen px) so we
-        // don't recompute in the inner loop.
-        const cache = [];
-        for (let i = 0; i < activeRings.length; i++) {
-            const r = activeRings[i];
-            const age = (now - r.born) / r.duration;
-            if (age < 0 || age > 1) continue;
-            const rad = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * age;
-            cache.push({ ring: r, age, rad });
-        }
+        const T = CONFIG.volumeThresholdVisual;
+        const proxRadius = CONFIG.ringTravel * INTERFERENCE.proximityFactor + CONFIG.ringBaseRadius;
         let spawned = 0;
-        outer:
-        for (let i = 0; i < cache.length; i++) {
-            const A = cache[i];
-            for (let j = i + 1; j < cache.length; j++) {
-                const B = cache[j];
-                if (A.ring.role === B.ring.role) continue;
-                const key = pairKey(A.ring.role, B.ring.role);
+        for (let i = 0; i < ROLES.length; i++) {
+            const a = ROLES[i];
+            const volA = effectiveVolumeFor(a);
+            if (volA < T) continue;          // Task 5: silent player = no seam
+            for (let j = i + 1; j < ROLES.length; j++) {
+                const b = ROLES[j];
+                const volB = effectiveVolumeFor(b);
+                if (volB < T) continue;       // Task 5: BOTH must be active
+                const srcA = sourcePositions[a], srcB = sourcePositions[b];
+                if (!srcA || !srcB) continue;
+                const dx = srcB.x - srcA.x, dy = srcB.y - srcA.y;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (d < INTERFERENCE.proximityMin || d > proxRadius) continue;
+                // Per-pair cooldown.
+                const key = pairKey(a, b);
                 const lastAt = pairCooldowns.get(key) || 0;
                 if (now - lastAt < INTERFERENCE.cooldownMs) continue;
-                const dx = B.ring.x - A.ring.x;
-                const dy = B.ring.y - A.ring.y;
-                const d  = Math.sqrt(dx * dx + dy * dy);
-                if (d < 1) continue;
-                // Circle-intersection condition.
-                if (Math.abs(A.rad - B.rad) < d && d < A.rad + B.rad) {
-                    // Perpendicular-bisector midpoint between intersections.
-                    const a = (A.rad * A.rad - B.rad * B.rad + d * d) / (2 * d);
-                    const mx = A.ring.x + (dx / d) * a;
-                    const my = A.ring.y + (dy / d) * a;
-                    // Angle from A to B — arcs draw PERPENDICULAR to this.
-                    const angle = Math.atan2(dy, dx);
-                    const intensity = (A.ring.intensity + B.ring.intensity) * 0.5;
-                    spawnInterferenceEvent(mx, my, A.ring.color, B.ring.color, angle, intensity);
-                    pairCooldowns.set(key, now);
-                    spawned++;
-                    if (spawned >= INTERFERENCE.maxEventsPerFrame) break outer;
-                }
+                spawnInterferenceSeam(a, b, srcA, srcB, volA, volB, d);
+                pairCooldowns.set(key, now);
+                spawned++;
+                if (spawned >= INTERFERENCE.maxEventsPerFrame) return;
             }
         }
-        // Prune stale cooldown entries periodically.
-        if (pairCooldowns.size > 12) {
+        // Prune stale cooldowns (only 3 possible pairs, but be tidy).
+        if (pairCooldowns.size > 6) {
             for (const [k, t] of pairCooldowns) {
                 if (now - t > INTERFERENCE.cooldownMs * 6) pairCooldowns.delete(k);
             }
         }
     }
 
-    function updateInterferenceEvents() {
+    function updateInterferenceSeams() {
         const now = performance.now();
-        activeInterferenceEvents = activeInterferenceEvents.filter(e => now - e.born < e.duration);
+        activeInterferenceEvents = activeInterferenceEvents.filter(
+            e => now - e.born < e.duration
+        );
     }
 
-    function drawInterferenceEvents() {
+    function drawInterferenceSeams() {
         const now = performance.now();
         for (const ev of activeInterferenceEvents) {
             const t = (now - ev.born) / ev.duration;
             if (t < 0 || t > 1) continue;
 
-            // Alpha envelope: sin(t·π) → peaks at mid-life, fades both ends.
-            // Subtle flicker at INTERFERENCE.flickerHz so it shimmers.
+            // Alpha envelope: sin(t·π) peaks mid-life; flicker shimmer on top.
             const env = Math.sin(t * Math.PI);
             const flick = 0.85 + 0.18 * Math.sin(t * Math.PI * INTERFERENCE.flickerHz + ev.phase);
             const peak  = env * flick * INTERFERENCE.peakAlphaMul * ev.intensity;
             if (peak < 0.04) continue;
 
-            const baseR = INTERFERENCE.baseRadius + INTERFERENCE.radiusGrowth * t;
             const col = `${ev.r},${ev.g},${ev.b}`;
+            // Axis vector = source-to-source direction; perp vector = ACROSS
+            // the gap, the direction the seam runs.
+            const axisX = Math.cos(ev.axisAngle);
+            const axisY = Math.sin(ev.axisAngle);
+            const perpX = -axisY;
+            const perpY =  axisX;
+            const halfLen = ev.seamLen * 0.5;
 
-            // Three thin curved arcs on EACH side of the centres-axis —
-            // perpendicular to the line connecting the two ring centres.
-            // The result reads as "wave bands crossing here".
-            ctx.strokeStyle = `rgba(${col},${peak.toFixed(3)})`;
-            ctx.lineWidth = 1.2;
-            const arcSpan = 0.95;          // ~54° arc per stroke
-            for (let side = 0; side < 2; side++) {
-                const sign = side === 0 ? -1 : 1;
-                const a0 = ev.angle + sign * Math.PI / 2 - arcSpan / 2;
-                for (let k = 0; k < INTERFERENCE.arcsPerSide; k++) {
-                    const r = baseR + k * INTERFERENCE.arcRadialGap;
-                    // Outer arcs fainter — gives the band a sense of depth.
-                    const arcAlpha = peak * (1 - k * 0.22);
-                    if (arcAlpha < 0.04) continue;
-                    ctx.strokeStyle = `rgba(${col},${arcAlpha.toFixed(3)})`;
-                    ctx.beginPath();
-                    ctx.arc(ev.x, ev.y, r, a0, a0 + arcSpan);
-                    ctx.stroke();
-                }
-            }
-            // Bright small pulse at the exact intersection midpoint.
-            // Peaks in the first third of the event then fades.
-            if (t < 0.35) {
-                const pulseAlpha = (1 - t / 0.35) * 0.75 * ev.intensity;
-                ctx.fillStyle = `rgba(${col},${pulseAlpha.toFixed(3)})`;
+            // Draw seamLineCount parallel wavy bands, slightly offset along
+            // the axis (toward and away from each source). Each band is a
+            // poly-line of seamSegments steps with sine wobble + endpoint
+            // taper so the seam fades to nothing at the tips.
+            for (let lineIdx = 0; lineIdx < INTERFERENCE.seamLineCount; lineIdx++) {
+                // Centre the bands around 0: e.g. for 3 lines, offsets -1, 0, +1
+                const lineCentred = lineIdx - (INTERFERENCE.seamLineCount - 1) * 0.5;
+                const lineAxialOffset = lineCentred * INTERFERENCE.seamLineGap;
+                // Outer bands fainter, thinner — gives the seam visual depth
+                // without putting a hard "centre line" the eye reads as UI.
+                const distFromCentre = Math.abs(lineCentred);
+                const bandAlpha = peak * (1 - distFromCentre * 0.30);
+                if (bandAlpha < 0.04) continue;
+                ctx.strokeStyle = `rgba(${col},${bandAlpha.toFixed(3)})`;
+                ctx.lineWidth = 1.6 - distFromCentre * 0.5;
                 ctx.beginPath();
-                ctx.arc(ev.x, ev.y, 2.2 + (1 - t) * 3.5, 0, Math.PI * 2);
-                ctx.fill();
+                for (let s = 0; s <= INTERFERENCE.seamSegments; s++) {
+                    const u = (s / INTERFERENCE.seamSegments - 0.5) * 2; // -1..1
+                    const seamPos = u * halfLen;
+                    // Endpoint taper — wobble + alpha pinch to 0 at |u|=1.
+                    const taper = 1 - Math.abs(u);
+                    // Two-frequency sine wobble = organic, not perfectly
+                    // sinusoidal. Phase + time → flows slightly during life.
+                    const wob =
+                        Math.sin(u * Math.PI * 2 + ev.phase + t * 4) * INTERFERENCE.seamWobbleAmp
+                        + Math.sin(u * Math.PI * 5 + ev.phase * 0.7) * (INTERFERENCE.seamWobbleAmp * 0.4);
+                    const wobble = wob * taper;
+                    // Position = midpoint + (seamPos along perp) + (offset along axis)
+                    const x = ev.midX + perpX * seamPos + axisX * (lineAxialOffset + wobble);
+                    const y = ev.midY + perpY * seamPos + axisY * (lineAxialOffset + wobble);
+                    if (s === 0) ctx.moveTo(x, y);
+                    else         ctx.lineTo(x, y);
+                }
+                ctx.stroke();
             }
         }
     }
+
+    // Back-compat aliases — the render loop used to call these names. Now
+    // they delegate to the seam system so the call sites don't need to
+    // change. The arc-cluster code above is fully replaced.
+    function detectWaveInterference() { detectInterferenceSeams(); }
+    function updateInterferenceEvents() { updateInterferenceSeams(); }
+    function drawInterferenceEvents() { drawInterferenceSeams(); }
 
     // Per-role phase offsets for the breathing animation. Thirds of 2π so
     // the three colours never pulse in lockstep — that lockstep would read
