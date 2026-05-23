@@ -225,17 +225,19 @@
             particleLifeMul: 1.80,      // particles linger
             ringLifeMul: 1.35,          // rings travel further over time
             paintField: true,
-            // Much softer than before (was 0.035) — accumulation should
-            // build gradually over many stamps, not slap down opaque
-            // patches. Threshold for "trace memory, not paint splatter".
-            paintFieldAlpha: 0.014,
-            paintFieldRadius: 50,       // smaller than before (was 64)
-            // Per-frame soft decay applied to the paint canvas. Without
-            // this, paint at very-low alpha would still eventually saturate
-            // after a long round. With it, the memory has a half-life:
-            // every ~3 seconds, old paint drops to ~half intensity.
-            // alpha = 1 − (1 − decay)^frames so this value is per-frame.
-            paintCanvasDecay: 0.0024,
+            // Inflow / outflow ratio matters more than either knob alone.
+            // Equilibrium ≈ stamp_alpha / decay_per_frame:
+            //   was 0.014 / 0.0024 = 5.8 → saturates fast, looks like blobs
+            //   now 0.005 / 0.008  = 0.625 → stationary aura peaks ~62%
+            // After speaking stops, half-life ≈ 1 s (60·log(0.5)/log(1-0.008)),
+            // mostly invisible by 6-8 s. Trace memory that visibly fades.
+            paintFieldAlpha: 0.005,
+            paintFieldRadius: 42,       // smaller still — softer footprint
+            // Aggressive per-frame destination-out decay on the paint
+            // canvas. Combined with the lowered stamp alpha, this gives
+            // the time-based fade the user asked for: traces persist for
+            // a few seconds, then visibly forget.
+            paintCanvasDecay: 0.008,
         },
     };
     function getModeConfig() {
@@ -582,8 +584,11 @@
     }
     // Defaults read from MODE_CONFIG at call time so it picks up tuning
     // changes immediately. (Helpers below avoid re-looking-up each frame.)
-    const CONFIG_PAINT_BASE_RADIUS = 50;
-    const CONFIG_PAINT_BASE_ALPHA  = 0.014;
+    // Kept in sync with MODE_CONFIG.accumulate.paintField{Radius,Alpha}.
+    // Could be read at call time instead — but reading constants is cheaper
+    // than dereferencing through MODE_CONFIG inside a per-frame hot path.
+    const CONFIG_PAINT_BASE_RADIUS = 42;
+    const CONFIG_PAINT_BASE_ALPHA  = 0.005;
     // Slow erase used by Live Mix to clear leftover paint from a previous
     // Fill Mode round. Uses destination-out so it removes colour rather
     // than darkening it. Alpha is small — clears in ~2-3 s.
@@ -1167,37 +1172,52 @@
         return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
     }
 
-    // Soft elongated oval between the two sources, oriented along the
-    // centres-axis. Reads as "the space where the two fields overlap" —
-    // NOT as a circular blob at the midpoint, because it's an ellipse
-    // long-aligned with the source axis. Very low alpha so it's a tint,
-    // not a fill. Drawn with 'lighter' composite so it gently brightens
-    // wherever it overlaps the existing wavefronts.
-    function drawOverlapField(srcA, srcB, blend, intensity, dist) {
+    // Thin contour strokes crossing the gap between two active sources.
+    // Replaces the previous filled ellipse overlap field, which read as
+    // a bubble / blob between the dots. These are PURE STROKES — no
+    // fill anywhere — drawn perpendicular to the centres axis with a
+    // sine wobble + endpoint taper so they fade to nothing at both ends.
+    // The visual reads as "interference contours crossing here" rather
+    // than "there is an object placed between these two dots".
+    function drawCrossingContours(srcA, srcB, blend, intensity) {
         if (intensity < 0.04) return;
         const midX = (srcA.x + srcB.x) * 0.5;
         const midY = (srcA.y + srcB.y) * 0.5;
         const dx = srcB.x - srcA.x, dy = srcB.y - srcA.y;
-        const angle = Math.atan2(dy, dx);
-        const lengthR = dist * INTERFERENCE.overlapLengthFactor;
-        const widthR  = dist * INTERFERENCE.overlapWidthFactor;
-        const alpha   = INTERFERENCE.overlapFieldAlpha * intensity;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 1) return;
+        const axisX = dx / d,           axisY = dy / d;
+        const perpX = -axisY,           perpY = axisX;
+        const halfLen = d * 0.20;       // contour spans 40% of gap width
+        const col = `${blend.r},${blend.g},${blend.b}`;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.translate(midX, midY);
-        ctx.rotate(angle);
-        // Soft radial gradient stretched into an ellipse by canvas scale.
-        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, lengthR);
-        const col = `${blend.r},${blend.g},${blend.b}`;
-        grad.addColorStop(0,    `rgba(${col},${alpha.toFixed(3)})`);
-        grad.addColorStop(0.5,  `rgba(${col},${(alpha * 0.45).toFixed(3)})`);
-        grad.addColorStop(1,    `rgba(${col},0)`);
-        ctx.fillStyle = grad;
-        // Use ellipse natively rather than scaling, so the gradient stays
-        // circular relative to the ellipse — soft edges in every direction.
-        ctx.beginPath();
-        ctx.ellipse(0, 0, lengthR, widthR, 0, 0, Math.PI * 2);
-        ctx.fill();
+        // 2 contours, slightly offset along the centres axis so they
+        // read as a pair of wavefronts crossing, not a single line.
+        for (let i = 0; i < 2; i++) {
+            const axialOffset = (i - 0.5) * 7;          // -3.5, +3.5 px
+            const baseX = midX + axisX * axialOffset;
+            const baseY = midY + axisY * axialOffset;
+            const alpha = intensity * 0.32;             // capped low — strokes only
+            if (alpha < 0.03) continue;
+            ctx.strokeStyle = `rgba(${col},${alpha.toFixed(3)})`;
+            ctx.lineWidth = 0.9;
+            ctx.beginPath();
+            const segments = 18;
+            for (let s = 0; s <= segments; s++) {
+                const u = (s / segments - 0.5) * 2;     // -1..1 across the contour
+                const taper = 1 - Math.abs(u);          // fade to 0 at tips
+                // Sine wobble + small time evolution + per-line phase.
+                const wob =
+                    Math.sin(u * Math.PI * 2 + time * 1.4 + i * 1.7) * 2.4
+                    + Math.sin(u * Math.PI * 5 + time * 0.9) * 0.9;
+                const x = baseX + perpX * u * halfLen + axisX * wob * taper;
+                const y = baseY + perpY * u * halfLen + axisY * wob * taper;
+                if (s === 0) ctx.moveTo(x, y);
+                else         ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
         ctx.restore();
     }
 
@@ -1264,13 +1284,21 @@
         const quieter  = Math.min(volA, volB);
         const intensity = Math.min(1, quieter * (0.5 + 0.8 * proxNorm));
 
-        // 1) Soft overlap field across the centres axis.
-        drawOverlapField(srcA, srcB, blend, intensity, dist);
-        // 2) Arcs attached to each source, opening toward the OTHER.
-        //    Source A's arcs open in axisAngle direction.
-        //    Source B's arcs open in axisAngle + π direction.
+        // STROKES ONLY — no filled shapes anywhere in this pipeline.
+        // (The old filled-ellipse overlap field has been removed because
+        // any filled gradient between the two sources read as a bubble /
+        // blob "thing placed there" rather than as field interaction.)
+        //
+        // 1) Compressed wavefront arcs attached to each source, opening
+        //    toward the OTHER. This is the primary deformation: each
+        //    source's own ripple is brightened/compressed on its
+        //    facing side.
         drawFacingArcs(srcA, axisAngle,            blend, intensity);
         drawFacingArcs(srcB, axisAngle + Math.PI,  blend, intensity);
+        // 2) Thin contour strokes crossing the gap — pure line work,
+        //    sine-wobble, taper-fades at the ends. They read as
+        //    interference contours between the two facing waves.
+        drawCrossingContours(srcA, srcB, blend, intensity);
     }
 
     // Per-frame: walk role pairs, draw deformation where appropriate.
@@ -2338,10 +2366,13 @@
         // visible ripples, not as something sitting beneath them.
         drawWaveInteractions();
         updateParticles();
-        // Particle-particle collision bursts (small sparks at micro-meet).
-        detectCollisions();
-        updateCollisionBursts();
-        drawCollisionBursts();
+        // (Particle-particle collision bursts disabled — those drew filled
+        //  radial-gradient circles that read as bubbles between sources.
+        //  Wave-field interaction via drawWaveInteractions above is the
+        //  sole collision visual now, and it's stroke-only by design.
+        //  Functions kept defined for future re-enabling without code
+        //  changes — just uncomment these three calls.)
+        // detectCollisions(); updateCollisionBursts(); drawCollisionBursts();
         drawParticles();
 
         ctx.restore();
