@@ -221,23 +221,30 @@
             paintFieldRadius: 0,
         },
         accumulate: {
-            trailAlpha: 0.012,          // very slow fade → traces persist
-            particleLifeMul: 1.80,      // particles linger
-            ringLifeMul: 1.35,          // rings travel further over time
+            // ARCHITECTURAL CHANGE: Fill Mode now has TWO clearly-separated
+            // layers, not one persistent surface. (a) The TEMPORARY layer
+            // (rings, particles, source clouds) clears at almost the same
+            // rate as Live Mix — these are momentary, not memory. (b) The
+            // MEMORY layer (activePaintTraces with explicit lifetimes) is
+            // the only thing that lingers. Without the separation, Fill
+            // Mode degenerated into "everything visible at once stays
+            // visible" — exactly the problem the user reported.
+            trailAlpha: 0.055,          // was 0.012 — main canvas now clears in ~1s
+            particleLifeMul: 1.0,        // was 1.80 — particles live like Live Mix
+            ringLifeMul: 1.05,           // was 1.35 — rings only slightly longer
+            cloudOpacityMul: 0.45,       // NEW — source cloud at 45% in Fill Mode
+                                          // so the live-volume cloud doesn't read
+                                          // as part of the memory
             paintField: true,
-            // Inflow / outflow ratio matters more than either knob alone.
-            // Equilibrium ≈ stamp_alpha / decay_per_frame:
-            //   was 0.014 / 0.0024 = 5.8 → saturates fast, looks like blobs
-            //   now 0.005 / 0.008  = 0.625 → stationary aura peaks ~62%
-            // After speaking stops, half-life ≈ 1 s (60·log(0.5)/log(1-0.008)),
-            // mostly invisible by 6-8 s. Trace memory that visibly fades.
-            paintFieldAlpha: 0.005,
-            paintFieldRadius: 42,       // smaller still — softer footprint
-            // Aggressive per-frame destination-out decay on the paint
-            // canvas. Combined with the lowered stamp alpha, this gives
-            // the time-based fade the user asked for: traces persist for
-            // a few seconds, then visibly forget.
-            paintCanvasDecay: 0.008,
+            // paintFieldAlpha/Radius are still consulted by spawnPaintTrace
+            // for the per-trace base values, but paintCanvas is no longer
+            // an accumulating surface — see PAINT_TRACE config + the
+            // activePaintTraces system. paintCanvasDecay is now 0 because
+            // paintCanvas is cleared + redrawn from the trace list each
+            // frame, not faded.
+            paintFieldAlpha: 0.32,       // peak per-trace alpha (gradient centre)
+            paintFieldRadius: 38,        // base trace radius (px)
+            paintCanvasDecay: 0,         // unused — kept so the field exists
         },
     };
     function getModeConfig() {
@@ -548,57 +555,135 @@
         paintCtx.setTransform(1, 0, 0, 1, 0, 0);
         paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
         paintCtx.restore();
+        // ALSO flush the trace list — otherwise mode-change / round-start
+        // / host-Clear-Fill would wipe the canvas only for the active
+        // traces to immediately redraw themselves next frame.
+        if (typeof activePaintTraces !== 'undefined') activePaintTraces = [];
     }
-    // Stamp a soft radial blob at (x, y) on the paint canvas, in role colour.
-    // Trace-memory aesthetic: each stamp is gentle; the EFFECT comes from
-    // many stamps accumulating, not from one heavy splat. Motion-aware:
-    // when the source is moving fast, stamps shrink so they form a thin
-    // path rather than a wide smear. Stationary sound = soft aura at the
-    // anchor; moving sound = soft trail along the path.
+    // ---- Trace-event system (replaces accumulating paintCanvas stamps) ----
+    // The previous design treated paintCanvas as the source of truth and
+    // applied a per-frame decay. That meant individual marks had no
+    // intrinsic lifetime — they all faded at the same rate, and any
+    // long-running session degenerated into a saturated wash.
     //
-    // Gradient now has FOUR stops with aggressive falloff: most of the
-    // visible area is in the outer 50% of the radius, fading to fully
-    // transparent at the edge. This is what makes the stamp read as a
-    // soft glow rather than a filled disc.
-    function stampPaint(x, y, color, volume, motionSpeedPx) {
+    // New design: state lives in activePaintTraces[]. Each trace has its
+    // own born/duration, knows how old it is, and is removed once
+    // expired. The paint canvas is now a cheap render cache: cleared and
+    // redrawn from the trace list every frame, never accumulating.
+    //
+    // Lifetime is intent-aware: loud sound → longer-lasting traces;
+    // moving sound → shorter (because new stamps will replace them
+    // along the path anyway). Per-role spawn cooldown keeps the trace
+    // count bounded even with continuous speaking. Hard cap of
+    // MAX_PAINT_TRACES so a worst-case (three loud players moving) can
+    // never overrun the render budget.
+    const PAINT_TRACE = {
+        cooldownMs:        150,     // per-role gap between stamps (~6.7/sec)
+        baseDurationMs:    5800,    // baseline trace lifetime (~5.8 s)
+        loudBonusMs:       2500,    // up to +2.5 s for loud sounds
+        movingPenaltyMs:  -1500,    // up to -1.5 s when moving fast
+        minDurationMs:     2500,    // floor — never shorter than this
+        baseRadius:        38,      // base px (volume + motion modulate)
+        radiusVolumeBoost: 18,      // px added at full volume
+        radiusGrowth:      0.25,    // trace expands 25% over its life
+        motionShrink:      0.55,    // moving stamps 55% smaller
+        baseAlpha:         0.32,    // peak alpha at gradient centre
+        fadeStart:         0.15,    // smoothstep edge0 — hold for first 15% of life
+        fadeEnd:           1.0,     // smoothstep edge1 — fully transparent at 100%
+        maxAlive:          80,      // hard cap; oldest dropped on overflow
+    };
+    let activePaintTraces = [];
+    const lastPaintTraceAt = { red: 0, green: 0, blue: 0 };
+
+    // Smooth fade curve. smoothstep(0.15, 1.0, age) is 0 for age≤0.15,
+    // ramps via 3t²-2t³ between 0.15 and 1.0, and 1 at age>=1.0. Then we
+    // use (1 - smoothstep) for the alpha multiplier — full alpha for the
+    // first 15% of life, gentle fade for the rest, zero at expiry.
+    function smoothstep(edge0, edge1, x) {
+        const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3 - 2 * t);
+    }
+
+    function spawnPaintTrace(role, x, y, color, volume, motionSpeedPx) {
         const speed = motionSpeedPx || 0;
-        // Motion factor: 0 stationary → ~1 at moderate movement
         const motionNorm = Math.min(1, speed / 5);
-        // Radius shrinks with motion so the trail is thin, not a smear.
-        // Base value lower than before; volume bumps it slightly.
-        const blobR = (CONFIG_PAINT_BASE_RADIUS + volume * 24) * (1 - motionNorm * 0.42);
-        // Alpha tuned MUCH softer; volume contribution kept small so loud
-        // doesn't spike the stamp into a paint blob — even Loud should
-        // feel like a brighter glow, not a paint mark.
-        const alpha = CONFIG_PAINT_BASE_ALPHA + volume * 0.020;
-        const col = `${color.r},${color.g},${color.b}`;
-        const grad = paintCtx.createRadialGradient(x, y, 0, x, y, blobR);
-        grad.addColorStop(0,    `rgba(${col},${alpha.toFixed(3)})`);
-        grad.addColorStop(0.35, `rgba(${col},${(alpha * 0.50).toFixed(3)})`);
-        grad.addColorStop(0.70, `rgba(${col},${(alpha * 0.15).toFixed(3)})`);
-        grad.addColorStop(1,    `rgba(${col},0)`);
-        paintCtx.fillStyle = grad;
-        paintCtx.beginPath();
-        paintCtx.arc(x, y, blobR, 0, Math.PI * 2);
-        paintCtx.fill();
+
+        // Lifetime — intent-aware. Loud sounds linger longer (we remember
+        // the punchy moments); moving sounds shorter (they're constantly
+        // being replaced by new stamps along the path).
+        let duration = PAINT_TRACE.baseDurationMs;
+        if (volume > 0.15) {
+            duration += PAINT_TRACE.loudBonusMs * Math.min(1, (volume - 0.15) / 0.20);
+        }
+        if (motionNorm > 0.3) {
+            duration += PAINT_TRACE.movingPenaltyMs * motionNorm;
+        }
+        duration = Math.max(PAINT_TRACE.minDurationMs, duration);
+
+        const radius = (PAINT_TRACE.baseRadius + volume * PAINT_TRACE.radiusVolumeBoost)
+                     * (1 - motionNorm * PAINT_TRACE.motionShrink);
+        const alpha = PAINT_TRACE.baseAlpha * (0.6 + Math.min(1, volume * 2) * 0.4);
+
+        // Hard cap: drop oldest if at capacity (the one most likely to
+        // already be near-invisible from fade-out anyway).
+        if (activePaintTraces.length >= PAINT_TRACE.maxAlive) {
+            activePaintTraces.shift();
+        }
+        activePaintTraces.push({
+            x, y, role, color,
+            born: performance.now(),
+            duration,
+            radius,
+            alpha,
+            motionSpeed: speed,
+            volume,
+        });
     }
-    // Defaults read from MODE_CONFIG at call time so it picks up tuning
-    // changes immediately. (Helpers below avoid re-looking-up each frame.)
-    // Kept in sync with MODE_CONFIG.accumulate.paintField{Radius,Alpha}.
-    // Could be read at call time instead — but reading constants is cheaper
-    // than dereferencing through MODE_CONFIG inside a per-frame hot path.
-    const CONFIG_PAINT_BASE_RADIUS = 42;
-    const CONFIG_PAINT_BASE_ALPHA  = 0.005;
-    // Slow erase used by Live Mix to clear leftover paint from a previous
-    // Fill Mode round. Uses destination-out so it removes colour rather
-    // than darkening it. Alpha is small — clears in ~2-3 s.
-    function fadePaintCanvas(amount) {
+
+    function updatePaintTraces() {
+        const now = performance.now();
+        activePaintTraces = activePaintTraces.filter(t => now - t.born < t.duration);
+    }
+
+    // Clear + redraw the paint canvas from the live trace list. Cost:
+    // ~1 gradient + 1 arc fill per trace per frame. With cooldownMs 150
+    // and average 6s lifetime, peak alive ≈ 40 per role × 3 roles = 120
+    // (capped at 80 by maxAlive). Each gradient is small (~50 px), so
+    // total per-frame cost is well within budget on modern hardware.
+    function drawPaintTraces() {
+        // Clear paintCanvas — it's now a render cache, not state.
         paintCtx.save();
-        paintCtx.globalCompositeOperation = 'destination-out';
-        paintCtx.fillStyle = `rgba(0,0,0,${amount})`;
-        paintCtx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+        paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+        paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
         paintCtx.restore();
+
+        if (activePaintTraces.length === 0) return;
+        const now = performance.now();
+        for (const tr of activePaintTraces) {
+            const age = (now - tr.born) / tr.duration;
+            if (age < 0 || age > 1) continue;
+            // (1 - smoothstep) gives a hold-then-fade alpha curve: stable
+            // at full strength for the first 15% of life, then a smooth
+            // 3t²-2t³ ease-out to zero by expiry.
+            const fadeMul = 1 - smoothstep(PAINT_TRACE.fadeStart, PAINT_TRACE.fadeEnd, age);
+            const alpha = tr.alpha * fadeMul;
+            if (alpha < 0.005) continue;
+            // Slight radius growth as the trace ages — the memory "spreads
+            // a little" as it dissolves, like a ripple in still water.
+            const r = tr.radius * (1 + age * PAINT_TRACE.radiusGrowth);
+            const col = `${tr.color.r},${tr.color.g},${tr.color.b}`;
+            const grad = paintCtx.createRadialGradient(tr.x, tr.y, 0, tr.x, tr.y, r);
+            grad.addColorStop(0,    `rgba(${col},${alpha.toFixed(3)})`);
+            grad.addColorStop(0.35, `rgba(${col},${(alpha * 0.50).toFixed(3)})`);
+            grad.addColorStop(0.70, `rgba(${col},${(alpha * 0.15).toFixed(3)})`);
+            grad.addColorStop(1,    `rgba(${col},0)`);
+            paintCtx.fillStyle = grad;
+            paintCtx.beginPath();
+            paintCtx.arc(tr.x, tr.y, r, 0, Math.PI * 2);
+            paintCtx.fill();
+        }
     }
+
     resizePaintCanvas();
     window.addEventListener('resize', resizePaintCanvas);
 
@@ -1395,7 +1480,11 @@
         const radius = lerp(CONFIG.cloudBaseRadius, CONFIG.cloudMaxRadius, vn);
         // Min opacity is generous so visitors can SEE where their colour will
         // emerge from before they make any sound. Max opacity grows with volume.
-        const opacity = lerp(CONFIG.cloudMinOpacity, CONFIG.cloudMaxOpacity, vn);
+        // Mode-aware multiplier: Fill Mode tones down the cloud to ~45% so
+        // it doesn't read as part of the memory layer (only the explicit
+        // activePaintTraces should linger after silence).
+        const cloudMul = getModeConfig().cloudOpacityMul || 1;
+        const opacity = lerp(CONFIG.cloudMinOpacity, CONFIG.cloudMaxOpacity, vn) * cloudMul;
         if (opacity < 0.01) return;
         const breathe = Math.sin(time * 1.5 + (color === 'red' ? 0 : color === 'green' ? 2 : 4)) * 5;
         const r2 = radius + breathe;
@@ -2292,33 +2381,35 @@
             v.y += (dvy - v.y) * VELOCITY_SMOOTH;
         }
 
-        // ---- Paint canvas (Fill Mode memory layer) ----
-        // In Fill Mode: stamp each speaking source's colour onto the
-        // dedicated paint canvas + apply a tiny per-frame decay so the
-        // memory has a slow half-life rather than building to saturation.
-        // Stamps are motion-aware (smaller when moving = thin trail).
-        // In Live Mix: don't stamp; instead, faster destination-out fade
-        // erases any leftover paint from a previous Fill round.
+        // ---- Trace-event memory layer (Fill Mode) ----
+        // In Fill Mode: spawn paint traces at PAINT_TRACE.cooldownMs per
+        // role (~6.7 stamps/sec each). Each trace has its own lifetime
+        // and fades on its own curve via drawPaintTraces. The paint
+        // canvas is cleared + redrawn from the trace list every frame —
+        // it's a render cache, not state, so it can never accumulate.
+        // In Live Mix: immediately empty the trace list AND clear the
+        // paint canvas — no fade-out — so Live always looks clean.
         if (mc.paintField) {
+            const nowMs = performance.now();
             for (const role of ROLES) {
                 const src = sourcePositions[role];
                 if (!src) continue;
                 const vol = Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
                 if (vol < CONFIG.volumeThresholdVisual) continue;
-                // Velocity → motion-aware stamp size. Idle source = wider
-                // soft aura; moving source = narrower thin-trail stamp.
+                // Per-role cooldown: keeps the alive-traces count bounded
+                // even with continuous speaking.
+                if (nowMs - (lastPaintTraceAt[role] || 0) < PAINT_TRACE.cooldownMs) continue;
+                lastPaintTraceAt[role] = nowMs;
                 const v = roleVelocityScreen[role] || { x: 0, y: 0 };
                 const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
-                stampPaint(src.x, src.y, COLORS[role], vol, speedPx);
+                spawnPaintTrace(role, src.x, src.y, COLORS[role], vol, speedPx);
             }
-            // Subtle per-frame decay on the paint canvas itself. Without
-            // this, low-alpha stamps would still build to saturation over
-            // a long round. With it, the memory has a slow half-life
-            // (~3s) so old traces gently fade as new ones arrive.
-            if (mc.paintCanvasDecay) fadePaintCanvas(mc.paintCanvasDecay);
+            updatePaintTraces();
+            drawPaintTraces();
         } else {
-            // Soft destination-out to clear lingering paint over a few seconds.
-            fadePaintCanvas(0.04);
+            // Live Mix: nothing lingers from a previous Fill round.
+            if (activePaintTraces.length > 0) activePaintTraces = [];
+            clearPaintCanvas();
         }
 
         // ────────────────────────────────────────────────────────────────
@@ -2529,16 +2620,20 @@
     // Visible only when the user presses D on the host/projection page.
     // Plain HTML+CSS panel — no canvas drawing — so it overlays naturally.
     const dbgElems = {
-        role:      document.getElementById('dbgRole'),
-        phase:     document.getElementById('dbgPhase'),
-        round:     document.getElementById('dbgRound'),
-        connected: document.getElementById('dbgConnected'),
-        volumes:   document.getElementById('dbgVolumes'),
-        sims:      document.getElementById('dbgSims'),
-        particles: document.getElementById('dbgParticles'),
-        rings:     document.getElementById('dbgRings'),
-        lastFrame: document.getElementById('dbgLastFrame'),
-        panel:     document.getElementById('debugPanel'),
+        role:        document.getElementById('dbgRole'),
+        phase:       document.getElementById('dbgPhase'),
+        round:       document.getElementById('dbgRound'),
+        connected:   document.getElementById('dbgConnected'),
+        volumes:     document.getElementById('dbgVolumes'),
+        sims:        document.getElementById('dbgSims'),
+        particles:   document.getElementById('dbgParticles'),
+        rings:       document.getElementById('dbgRings'),
+        paintTraces: document.getElementById('dbgPaintTraces'),
+        oldestTrace: document.getElementById('dbgOldestTrace'),
+        fillTuning:  document.getElementById('dbgFillTuning'),
+        simVol:      document.getElementById('dbgSimVol'),
+        lastFrame:   document.getElementById('dbgLastFrame'),
+        panel:       document.getElementById('debugPanel'),
     };
     function renderDebugPanel() {
         if (!dbgElems.panel) return;
@@ -2553,6 +2648,40 @@
         dbgElems.sims.textContent      = `${fmt(simulatedVolumes.red)} / ${fmt(simulatedVolumes.green)} / ${fmt(simulatedVolumes.blue)}`;
         dbgElems.particles.textContent = `R=${cnt.red}  G=${cnt.green}  B=${cnt.blue}  total=${activeParticles.length}`;
         dbgElems.rings.textContent     = String(activeRings.length);
+
+        // --- Fill Mode fade diagnostics ---
+        // Trace count + oldest-age% so we can tell whether "still visible"
+        // is from a healthy trace pool or from a stuck render.
+        if (dbgElems.paintTraces) {
+            dbgElems.paintTraces.textContent = `${activePaintTraces.length} active`;
+        }
+        if (dbgElems.oldestTrace) {
+            if (activePaintTraces.length === 0) {
+                dbgElems.oldestTrace.textContent = 'none';
+            } else {
+                const nowMs = performance.now();
+                let oldestAge = 0;
+                for (const tr of activePaintTraces) {
+                    const a = (nowMs - tr.born) / tr.duration;
+                    if (a > oldestAge) oldestAge = a;
+                }
+                dbgElems.oldestTrace.textContent = `${(oldestAge * 100).toFixed(0)}% of life`;
+            }
+        }
+        if (dbgElems.fillTuning) {
+            const mc = getModeConfig();
+            dbgElems.fillTuning.textContent =
+                `trail=${(mc.trailAlpha || 0).toFixed(3)}  ` +
+                `pLife=${(mc.particleLifeMul || 1).toFixed(2)}  ` +
+                `rLife=${(mc.ringLifeMul || 1).toFixed(2)}`;
+        }
+        if (dbgElems.simVol) {
+            // Same as dbgElems.sims, but explicit role labels — quick read
+            // for "is simulated volume still active and stamping traces?"
+            dbgElems.simVol.textContent =
+                `R=${fmt(simulatedVolumes.red)} G=${fmt(simulatedVolumes.green)} B=${fmt(simulatedVolumes.blue)}`;
+        }
+
         dbgElems.lastFrame.textContent = lastFrameAt
             ? `${Math.round(performance.now() - lastFrameAt)}ms ago`
             : 'never';
