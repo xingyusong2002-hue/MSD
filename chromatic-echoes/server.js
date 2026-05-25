@@ -292,8 +292,16 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Default: static file serving (unchanged).
-    let filePath = path.join(__dirname, pathOnly === '/' ? 'index.html' : pathOnly);
+    // Default: static file serving.
+    // decodeURI converts %20 → space, %2D → -, etc. Without this, any
+    // asset filename with spaces or special characters 404s — even though
+    // the file is on disk — because fs.readFile gets the raw URL-encoded
+    // name. Use decodeURI (not decodeURIComponent) so / stays as path
+    // separator. Wrap in try/catch because malformed URIs throw.
+    let decodedPath;
+    try { decodedPath = decodeURI(pathOnly); }
+    catch { res.writeHead(400); res.end('Bad URL'); return; }
+    let filePath = path.join(__dirname, decodedPath === '/' ? 'index.html' : decodedPath);
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME[ext] || 'application/octet-stream';
     fs.readFile(filePath, (err, data) => {
