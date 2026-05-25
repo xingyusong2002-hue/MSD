@@ -174,30 +174,18 @@ body {
                                 stacking context, so it can't be hidden by
                                 html/body backgrounds */
     pointer-events: none;
-    /* Refinement pass v3: previous L=14% was perceptually too close to
-       black at projection distance. L=19-21% crosses the threshold
-       where the eye registers "warm brown" rather than "near-black".
-       Base colour is now firmly in the brief's suggested range
-       (#22110c / #2a140d), with brighter radial accents reaching
-       toward #3a1b12 at low alpha for atmospheric warmth.
-
-       FOUR radial gradients now (was three): two corner-anchored
-       primary blobs, one large central halo, and one wide off-centre
-       accent in the upper-right that drifts independently. Each blob
-       uses higher chroma (0.04-0.05 vs previous 0.024-0.04) so brown
-       reads as brown, not as a missing colour. */
-    /* Refinement pass v6: parent now carries ONLY a dark base + a
-       very soft central vignette. The atmospheric haze comes from
-       the ::before and ::after pseudo-elements below, which use
-       mix-blend-mode: screen to LIFT the dark base toward warm
-       cream — that lift IS the visible drift. Previous versions
-       loaded the parent with 4 heavy radial gradients, which read
-       as a solid tinted background rather than haze. */
+    overflow: hidden;       /* clip oversized pseudo-elements cleanly */
+    /* Refinement pass v7: parent carries only a dark base + soft
+       central vignette. Atmosphere comes from the pseudo-elements
+       below — ::before is a DIAGONAL linear-gradient ribbon that
+       drifts across, ::after is two soft warm-cream haze blobs.
+       Together they produce the "diagonal soft gradient bands moving
+       across a dark room" feel of the reference. */
     background:
         radial-gradient(ellipse at center,
-            rgba(34, 15, 10, 0.92) 0%,
-            rgba(12,  5,  4, 1.00) 75%),
-        #100604;  /* deep almost-black warm brown — the haze sits on top of this */
+            rgba(32, 13, 8, 0.95) 0%,
+            rgba(13,  5, 4, 1.00) 72%),
+        #100604;
 }
 
 /* ---- Refinement pass v4: blurred floating blobs ----
@@ -246,65 +234,86 @@ body {
    monitors and tall mobiles alike. Translation uses vw/vh so blobs
    sweep across viewport-scale distances, sweeping through the
    empty left/right areas around the central playground. */
+/* Pseudo-elements share the common positioning + blend + GPU hints.
+   mix-blend-mode: screen LIFTS the dark base toward warm cream —
+   safety: blend modes only blend with what's BEHIND in the same
+   stacking context. With isolation: isolate on body, these blobs
+   blend only with #ambientBackground's own dark base. Playground
+   (z=1) and canvas (z=2) stack ABOVE — sound visuals untouched. */
 #ambientBackground::before,
 #ambientBackground::after {
     content: '';
     position: absolute;
     pointer-events: none;
-    will-change: transform;        /* hint GPU compositing */
-    mix-blend-mode: screen;        /* only lifts the dark base */
+    will-change: transform;
+    mix-blend-mode: screen;
 }
 
-/* Haze A — larger warmer-cream, sweeps from upper-left across right. */
+/* ::before — DIAGONAL warm ribbon bands.
+   The 115deg linear-gradient with non-uniform soft stops creates
+   the "long blurred diagonal light bands moving across a dark
+   background" feel of the reference. rotate(-4deg) tilts the
+   element's own axis so the bands sit slightly off the gradient
+   angle — gives organic skew rather than mechanical stripe. */
 #ambientBackground::before {
-    width: 90vmax;
-    height: 70vmax;
-    left: -20vmax;
-    top: 5vmax;
-    background: radial-gradient(ellipse at center,
-        rgba(210, 170, 145, 0.11) 0%,
-        rgba(140,  85,  65, 0.07) 35%,
-        rgba( 75,  32,  22, 0.03) 62%,
-        transparent 78%);
-    filter: blur(70px);
-    opacity: 0.75;
-    animation: ambientMistA 48s ease-in-out infinite alternate;
+    inset: -35%;
+    background:
+        linear-gradient(115deg,
+            transparent 0%,
+            transparent 28%,
+            rgba(220, 185, 155, 0.055) 34%,
+            rgba(150,  90,  65, 0.035) 39%,
+            transparent 47%,
+            transparent 54%,
+            rgba(200, 150, 125, 0.040) 60%,
+            rgba(100,  48,  32, 0.025) 66%,
+            transparent 75%,
+            transparent 100%);
+    filter: blur(34px);
+    opacity: 0.85;
+    transform: rotate(-4deg) scale(1.15);
+    animation: ambientRibbons 55s ease-in-out infinite alternate;
 }
 
-/* Haze B — slightly smaller warm tan, sweeps from lower-right.
-   Different size/position/period — never aligns with Haze A. */
+/* ::after — very soft warm haze blobs underneath the ribbons.
+   Two radial gradients with low alpha + heavy blur — adds the
+   ambient warmth so the ribbons read as bands of light passing
+   through warm air rather than stripes on a flat backdrop. */
 #ambientBackground::after {
-    width: 80vmax;
-    height: 85vmax;
-    right: -25vmax;
-    bottom: -15vmax;
-    background: radial-gradient(ellipse at center,
-        rgba(185, 135, 120, 0.090) 0%,
-        rgba(115,  62,  48, 0.055) 42%,
-        rgba( 50,  20,  14, 0.025) 68%,
-        transparent 84%);
-    filter: blur(90px);
+    inset: -25%;
+    background:
+        radial-gradient(ellipse 70% 55% at 25% 40%,
+            rgba(160, 105, 85, 0.075) 0%,
+            rgba( 90,  42, 28, 0.035) 45%,
+            transparent 75%),
+        radial-gradient(ellipse 65% 50% at 80% 65%,
+            rgba(190, 145, 120, 0.055) 0%,
+            rgba( 95,  48,  34, 0.028) 48%,
+            transparent 78%);
+    filter: blur(85px);
     opacity: 0.65;
-    animation: ambientMistB 62s ease-in-out infinite alternate;
+    animation: ambientMistSlow 70s ease-in-out infinite alternate;
 }
 
-/* Drift in viewport units (vw/vh) so motion sweeps across the empty
-   left/right border areas instead of just bobbing in place.
-   Rotation kept small so motion reads as "drift", not "spin".
-   translate3d engages the GPU compositor layer for smooth playback. */
-@keyframes ambientMistA {
-    0%   { transform: translate3d(-4vw,  2vh, 0) scale(1.00) rotate(0deg); }
-    35%  { transform: translate3d(10vw, -3vh, 0) scale(1.08) rotate(4deg); }
-    70%  { transform: translate3d( 5vw,  6vh, 0) scale(1.15) rotate(-3deg); }
-    100% { transform: translate3d(16vw,  1vh, 0) scale(1.06) rotate(6deg); }
+/* Ribbon drift — large vw translation so the bands sweep across
+   the screen visibly. Rotation stays in the -7..-2deg range so the
+   ribbons drift diagonally without spinning. Scale grows slightly
+   so they feel like distant air-flow approaching, not bobbing. */
+@keyframes ambientRibbons {
+    0%   { transform: translate3d(-12vw, -4vh, 0) rotate(-7deg) scale(1.16); }
+    35%  { transform: translate3d(  4vw,  3vh, 0) rotate(-3deg) scale(1.22); }
+    70%  { transform: translate3d( 13vw, -2vh, 0) rotate(-6deg) scale(1.18); }
+    100% { transform: translate3d( 22vw,  5vh, 0) rotate(-2deg) scale(1.24); }
 }
 
-@keyframes ambientMistB {
-    0%   { transform: translate3d(  5vw, -2vh, 0) scale(1.08) rotate(0deg); }
-    40%  { transform: translate3d( -8vw,  5vh, 0) scale(0.98) rotate(-5deg); }
-    75%  { transform: translate3d(-14vw, -4vh, 0) scale(1.12) rotate(3deg); }
-    100% { transform: translate3d( -4vw,  6vh, 0) scale(1.04) rotate(-4deg); }
+/* Slow background mist — smaller translations + opacity breathing
+   to add another rhythm so the cycle never visibly repeats. */
+@keyframes ambientMistSlow {
+    0%   { transform: translate3d( 4vw,  2vh, 0) scale(1.05); opacity: 0.50; }
+    50%  { transform: translate3d(-5vw, -3vh, 0) scale(1.13); opacity: 0.70; }
+    100% { transform: translate3d( 8vw,  4vh, 0) scale(1.08); opacity: 0.58; }
 }
+
 
 /* ---- Playground floor (top-view Dead Room photo) ----
    The actual playable area. Sized to MATCH getMapBounds() in app.js so
