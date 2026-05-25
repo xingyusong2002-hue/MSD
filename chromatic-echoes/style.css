@@ -68,26 +68,44 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* CRITICAL: the fallback colour lives on <html>, NOT <body>.
-   #ambientBackground sits inside <body> at z-index: -1. An opaque
-   body background would paint OVER #ambientBackground (CSS backgrounds
-   ignore negative z-index of children — they are part of the element
-   box, not stack participants), making the warm-brown atmosphere
-   invisible. Keep body transparent so #ambientBackground can show
-   through. The html background is the deepest fallback before the
-   gradients paint. */
+/* ---- Stacking-context discipline (refinement pass v5) ----
+   The previous setup used z-index: -1 on #ambientBackground with the
+   fallback colour on <html>. z-index: -1 is the unreliable corner of
+   CSS — its behaviour vs. parent backgrounds depends on whether the
+   parent has a stacking context, and browsers handle the edge cases
+   inconsistently (Chrome with hardware-acceleration in particular).
+
+   The fix: switch to a POSITIVE stacking order inside an explicit
+   body stacking context.
+     - isolation: isolate on <body> creates a new stacking context.
+       All child z-indexes are now scoped to body — nothing inside
+       can ever escape upward, nothing outside can sink in.
+     - The fallback colour moves to <body> itself (deep warm brown
+       — #120907). This is the deepest visible layer before any
+       child paints. No more invisible-ambient-behind-html-background.
+     - Children stack with positive z-index in clear ascending order:
+         0 → #ambientBackground (warm drift, behind everything else)
+         1 → #playgroundFloor   (top-view photo)
+         2 → #rippleCanvas      (sound visualisation, the foreground)
+       100 → .screen menus
+      1000 → HUD overlays
+   No z-index is negative anywhere now; the layer order is deterministic. */
 html {
-    background: var(--color-bg);
+    background: #120907;   /* deepest fallback — never pure black */
 }
 body {
-    background: transparent;
+    position: relative;
+    isolation: isolate;
+    background: #120907;   /* deep warm brown — visible before ambient paints */
 }
 
 /* ---- Canvas ----
    Background is TRANSPARENT so the top-view Dead Room photo
    (#playgroundFloor) shows through. Canvas particles + ripples paint on
    top of that photo via destination-out trail-fade compositing — see
-   render() in app.js for the technique. */
+   render() in app.js for the technique.
+   z-index: 2 sits above #playgroundFloor (z=1) and #ambientBackground
+   (z=0). Menus (z=100) and HUD (z=1000) stay above the canvas. */
 #rippleCanvas {
     position: fixed;
     inset: 0;
@@ -95,6 +113,7 @@ body {
     height: 100%;
     display: block;
     background: transparent;
+    z-index: 2;
 }
 
 /* ---- Tunable knobs for the playground refinement pass ----
@@ -151,7 +170,9 @@ body {
 #ambientBackground {
     position: fixed;
     inset: 0;
-    z-index: -1;
+    z-index: 0;             /* was -1 — now a positive index inside body's
+                                stacking context, so it can't be hidden by
+                                html/body backgrounds */
     pointer-events: none;
     /* Refinement pass v3: previous L=14% was perceptually too close to
        black at projection distance. L=19-21% crosses the threshold
@@ -322,7 +343,8 @@ body {
     height: min(78vw, 78vh);
     transform: translate(-50%, -50%);
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;             /* sits above #ambientBackground (z=0),
+                                below #rippleCanvas (z=2) */
 
     /* Default hidden — fades in only via body.in-playground below. */
     opacity: 0;
