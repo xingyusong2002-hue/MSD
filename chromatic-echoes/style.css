@@ -63,20 +63,248 @@ body {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: var(--color-bg);
     font-family: var(--font-main);
     color: var(--color-text);
     -webkit-font-smoothing: antialiased;
 }
 
-/* ---- Canvas ---- */
+/* CRITICAL: the fallback colour lives on <html>, NOT <body>.
+   #ambientBackground sits inside <body> at z-index: -1. An opaque
+   body background would paint OVER #ambientBackground (CSS backgrounds
+   ignore negative z-index of children — they are part of the element
+   box, not stack participants), making the warm-brown atmosphere
+   invisible. Keep body transparent so #ambientBackground can show
+   through. The html background is the deepest fallback before the
+   gradients paint. */
+html {
+    background: var(--color-bg);
+}
+body {
+    background: transparent;
+}
+
+/* ---- Canvas ----
+   Background is TRANSPARENT so the top-view Dead Room photo
+   (#playgroundFloor) shows through. Canvas particles + ripples paint on
+   top of that photo via destination-out trail-fade compositing — see
+   render() in app.js for the technique. */
 #rippleCanvas {
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     display: block;
-    background: var(--color-bg);
+    background: transparent;
+}
+
+/* ---- Tunable knobs for the playground refinement pass ----
+   Centralised so a non-coder can tune feel without hunting through rules.
+     • --playground-opacity: how strongly the top-view photo reads. Lower
+       values keep the sound visualisation as the primary focus. The
+       refinement-pass brief asked for 0.45-0.70; 0.55 is a deliberate
+       middle ground.
+     • --playground-fade-in: how long the photo takes to appear after
+       entering the Dead Room. Keep short (0.5-1.0s) so it feels
+       intentional, not delayed.
+     • --playground-mask-soft: the inner radius of the edge mask. Higher
+       = harder edges, lower = softer fade-out. 0.72 keeps the centre
+       fully visible while the corners taper to nothing.
+     • --playground-halo-rgba: colour + alpha of the warm halo around
+       the photo. The frame the brief asked us to preserve. */
+:root {
+    --playground-opacity: 0.62;
+    --playground-fade-in: 0.9s;
+    --playground-mask-soft: 0.66;        /* softer corner fade than before */
+    --playground-halo-rgba: 95, 70, 42;   /* warm brown, alpha set per-shadow */
+
+    /* Photo darkening / tinting — refinement pass.
+       The brief asked us NOT to fix the "too dominant" problem with
+       opacity alone. These three filter values do the real work:
+       brightness pulls the photo's mid-tones into the surrounding dark,
+       contrast softens the bright wedge highlights so they don't punch
+       through the sound layer, saturate desaturates slightly so the
+       photo doesn't fight the R/G/B sound dots for colour attention. */
+    --playground-photo-brightness: 0.55;
+    --playground-photo-contrast:   0.85;
+    --playground-photo-saturate:   0.82;
+
+    /* Warm tint overlay (multiplied onto the filtered photo).
+       Keeps the photo feeling like a Dead Room, not a black hole. */
+    --playground-tint-rgba: 28, 14, 8;
+    --playground-tint-alpha: 0.32;
+    /* Inset vignette — edge darkening that makes the photo "sink into"
+       the surrounding atmosphere instead of cutting off as a hard box. */
+    --playground-edge-vignette: 0.55;     /* alpha at the corners */
+}
+
+/* ---- Ambient deep-brown background ----
+   Replaces the flat var(--color-bg) feel during gameplay (and elsewhere)
+   with a faint, slow-drifting warm atmosphere. Two large radial
+   gradients at low alpha; the keyframe animation moves their positions
+   over ~28s and ~38s with no linear motion (sine-like easing via
+   alternate direction). The animation is continuous but the radii are
+   huge relative to the viewport, so what visitors see is a quiet
+   ambient shift — never a discrete moving graphic.
+
+   Performance: this is a single layer composited by the GPU. Zero JS
+   cost, zero per-frame canvas overhead. Safe to run all the time. */
+#ambientBackground {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    /* Refinement pass v3: previous L=14% was perceptually too close to
+       black at projection distance. L=19-21% crosses the threshold
+       where the eye registers "warm brown" rather than "near-black".
+       Base colour is now firmly in the brief's suggested range
+       (#22110c / #2a140d), with brighter radial accents reaching
+       toward #3a1b12 at low alpha for atmospheric warmth.
+
+       FOUR radial gradients now (was three): two corner-anchored
+       primary blobs, one large central halo, and one wide off-centre
+       accent in the upper-right that drifts independently. Each blob
+       uses higher chroma (0.04-0.05 vs previous 0.024-0.04) so brown
+       reads as brown, not as a missing colour. */
+    background:
+        radial-gradient(ellipse 75% 65% at 28% 32%,
+            oklch(30% 0.052 50 / 0.78) 0%,
+            oklch(22% 0.038 48 / 0.40) 40%,
+            transparent 78%),
+        radial-gradient(ellipse 65% 75% at 78% 72%,
+            oklch(28% 0.046 45 / 0.70) 0%,
+            oklch(21% 0.034 45 / 0.32) 45%,
+            transparent 82%),
+        /* Wide off-centre accent — upper-right warm bronze halo. */
+        radial-gradient(ellipse 45% 55% at 85% 18%,
+            oklch(26% 0.045 40 / 0.45) 0%,
+            oklch(20% 0.030 45 / 0.18) 55%,
+            transparent 90%),
+        /* Large central halo behind the playground — slow breathe via
+           the second animation. Pulses around the room. */
+        radial-gradient(circle 95% at 50% 50%,
+            oklch(24% 0.040 50 / 0.55) 0%,
+            oklch(19% 0.030 48 / 0.22) 50%,
+            transparent 88%),
+        oklch(21% 0.038 45);  /* deep warm brown base — ≈ #2f1611, clearly brown not black */
+    /* Two parallel animations: drift moves the gradient positions;
+       breath ramps opacity. Periods (28s + 22s) are non-aligning so
+       the visual cycle never repeats. The drift amplitude is larger
+       this pass so motion is genuinely perceivable. */
+    animation:
+        ambientDrift  28s ease-in-out infinite alternate,
+        ambientBreath 22s ease-in-out infinite;
+}
+
+@keyframes ambientDrift {
+    0%   { background-position:  0% 0%,   100% 100%,  100% 0%,  50% 50%, 0 0; }
+    50%  { background-position: 12% -6%,   88% 94%,    92% 8%,  53% 48%, 0 0; }
+    100% { background-position: -6% 8%,   106% 106%,  108% -6%, 47% 52%, 0 0; }
+}
+
+/* Global luminance breathe — slightly wider amplitude than v2
+   (0.88..1.00 instead of 0.94..1.00) so the "inhale" is perceivable
+   without becoming a discrete animation. */
+@keyframes ambientBreath {
+    0%   { opacity: 0.90; }
+    50%  { opacity: 1.00; }
+    100% { opacity: 0.90; }
+}
+
+/* ---- Playground floor (top-view Dead Room photo) ----
+   The actual playable area. Sized to MATCH getMapBounds() in app.js so
+   the photo's wooden-wedge frame aligns with the canvas's clip
+   rectangle. If you change ROOM_ASPECT in app.js, change the multiplier
+   here (the 1.0784 below) to match.
+
+   Visibility is gated by body.in-playground (set in app.js when stage =
+   dead-room AND phase = playing). Default opacity 0 prevents the photo
+   from flashing during landing → lobby → playing transitions.
+
+   Edge mask: a soft radial mask fades the photo to transparent at the
+   corners so the rectangular outline doesn't feel pasted on. Combined
+   with the warm halo (box-shadow) this gives the photo a "breathing
+   through the brown atmosphere" feel instead of a hard sticker edge.
+
+   The image filename below has SPACES — the quotes around the url() are
+   required. Keep them. */
+/* Three-layer construct:
+     • #playgroundFloor (container) — holds geometry, mask, halo, and
+       the opacity fade-in gate. NO background image here.
+     • ::before — the photo with brightness/contrast/saturate filter
+       so it darkens and integrates without losing texture.
+     • ::after — warm-brown tint + inset radial vignette so the
+       rectangle dissolves into the surrounding atmosphere instead of
+       cutting off as a hard photo edge.
+   This separation is what lets each layer be tuned independently. */
+#playgroundFloor {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: calc(min(78vw, 78vh) * 1.0784);
+    height: min(78vw, 78vh);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 0;
+
+    /* Default hidden — fades in only via body.in-playground below. */
+    opacity: 0;
+    transition: opacity var(--playground-fade-in) ease-out;
+
+    /* Soft radial mask — full opacity in the centre, tapering to zero at
+       the corners. Applied to the container so it masks both ::before
+       and ::after as one unit. Same mask on both standard and webkit
+       prefixes for Safari/older Chromium. */
+    -webkit-mask-image: radial-gradient(ellipse 88% 88% at center,
+        rgba(0, 0, 0, 1) calc(var(--playground-mask-soft) * 100%),
+        rgba(0, 0, 0, 0) 100%);
+            mask-image: radial-gradient(ellipse 88% 88% at center,
+        rgba(0, 0, 0, 1) calc(var(--playground-mask-soft) * 100%),
+        rgba(0, 0, 0, 0) 100%);
+
+    /* Warm brown halo — kept (NOT removed when the painted boundary
+       comes back). The halo is a soft ambient glow; the painted
+       boundary is a thin breathing stroke. They live at different
+       visual frequencies and complement each other. */
+    box-shadow:
+        0 0 30px  6px rgba(var(--playground-halo-rgba), 0.18),
+        0 0 100px 12px rgba(var(--playground-halo-rgba), 0.10);
+}
+
+/* ::before — the filtered photo. The filter values are tuned via
+   :root custom properties so a non-coder can sweep through them.
+   The filter only applies to this pseudo-element, leaving the halo,
+   mask, and tint overlay alone. */
+#playgroundFloor::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url('assets/Top view of the deadroom.png') center/contain no-repeat;
+    filter:
+        brightness(var(--playground-photo-brightness))
+        contrast(var(--playground-photo-contrast))
+        saturate(var(--playground-photo-saturate));
+}
+
+/* ::after — warm-brown tint (multiplied feel without using mix-blend-mode
+   so we don't fight the canvas above) + inset radial vignette so the
+   edges fade into the surrounding atmosphere instead of stopping
+   abruptly. The vignette's transparent centre means the photo reads
+   cleanly in the middle and dissolves at the corners. */
+#playgroundFloor::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        /* Inset vignette — transparent core → warm dark at corners. */
+        radial-gradient(ellipse 100% 100% at center,
+            transparent 50%,
+            rgba(15, 10, 7, var(--playground-edge-vignette)) 100%),
+        /* Flat warm tint on top of the filtered photo. */
+        rgba(var(--playground-tint-rgba), var(--playground-tint-alpha));
+}
+
+body.in-playground #playgroundFloor {
+    opacity: var(--playground-opacity);
 }
 
 /* ---- Screen System ---- */

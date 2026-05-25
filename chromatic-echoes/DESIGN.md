@@ -132,14 +132,140 @@ content; they should never be the primary action.
 
 ### Photo-backed screens and their images
 
-Four screens currently use a Dead Room photograph as the backdrop:
+Four menu screens and the live playground use Dead Room photographs:
 
-| Screen | Image (in `assets/`) | Use |
+| Element | Image (in `assets/`) | Use |
 |---|---|---|
 | `#screenLanding` | `DeadRoom-63.png` | The entrance/landing. |
 | `#screenWaitingRoom` | `DeadRoom-63.png` | Visual continuity with Landing — same photo. |
 | `#screenThreshold` | `stage2.png` | The doorway photo — visitors are about to step inside. |
 | `#screenRoles` | `player.png` | The chamber-with-people photo — players are choosing what they'll be in that room. |
+| `#playgroundFloor` | `Top view of the deadroom.png` | The live playground itself — the top-down anechoic-chamber photo on which all particles/ripples render. **Replaces the previously painted foam-wedge boundary**; the photo's own wooden wedges are now the visible frame. |
+
+The playground floor uses a different recipe to the menu screens because
+it sits *under* the live canvas, not behind static UI:
+
+- Sized to match `getMapBounds()` in `app.js` via `calc(min(78vw, 78vh)
+  * ROOM_ASPECT)` where `ROOM_ASPECT = 1.0784` (1073/995, the photo's
+  intrinsic aspect). Keep CSS + JS in sync if you swap the photo.
+- `background-size: contain` (not `cover`) so the photo's wedge frame
+  aligns exactly with the canvas clip rectangle.
+- Visibility is gated by a `body.in-playground` class set in `app.js`
+  when `experienceStage === 'dead-room'` AND `phase === 'playing'`.
+  Default opacity is **0**; only when the class is present does the
+  photo fade in to `var(--playground-opacity)`. This prevents the
+  photo from flashing through during landing → lobby → playing
+  transitions — a real problem before the refinement pass.
+- A soft radial `mask-image` fades the photo's corners to transparent,
+  so the rectangular box doesn't read as "pasted in".
+- A warm-brown `box-shadow` halo replaces the previously-painted foam
+  frame, preserving the "defined exhibit zone" feel without competing
+  with the photo's own wooden wedges.
+- The canvas above runs trail-fade in `globalCompositeOperation =
+  'destination-out'` mode, ERASING pixels rather than painting dark
+  over them. This is what lets the photo stay visible through the
+  particle layer; the older "fill semi-transparent dark each frame"
+  approach would have buried the photo within ~1 second.
+- The procedural foam-wedge boundary (`drawAcousticFoamBoundary` in
+  `app.js`) is gated behind `DRAW_PAINTED_FOAM_BOUNDARY` (default
+  `false`) — the photo's wedges + CSS halo replace it. Flip the flag
+  true if you ever swap back to a photo-less playground.
+
+### Three-layer integration (refinement pass v2)
+
+The playground is no longer a single background-image rule. It's split
+into three CSS layers tuned independently:
+
+```
+#playgroundFloor          ← container: geometry, mask, halo, fade-in gate
+  ├─ ::before             ← the photo + filter(brightness/contrast/saturate)
+  └─ ::after              ← warm tint + inset radial vignette (edge dissolve)
+```
+
+Why split: a single rule's `filter` would also filter the box-shadow halo
+and mask, which we explicitly need *unfiltered*. The pseudo-elements
+keep the filter scoped to the photo only. The mask on the container
+masks both pseudos together as one unit, so the edge dissolve stays
+visually consistent.
+
+### Tuning knobs (CSS custom properties on `:root`)
+
+The refinement pass exposes nine `--playground-*` variables so feel can
+be tuned without touching rule bodies:
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `--playground-opacity` | `0.62` | Final container opacity when visible. Brief asked for 0.45-0.70. |
+| `--playground-fade-in` | `0.9s` | How long the photo takes to appear after entering Dead Room. |
+| `--playground-mask-soft` | `0.66` | Inner radius of the corner-fade mask (0..1). Higher = harder edges. |
+| `--playground-halo-rgba` | `95, 70, 42` | RGB of the warm box-shadow halo. |
+| `--playground-photo-brightness` | `0.55` | CSS filter on the photo. Lower = darker. |
+| `--playground-photo-contrast`   | `0.85` | CSS filter on the photo. Lower = softer mid-tones. |
+| `--playground-photo-saturate`   | `0.82` | CSS filter on the photo. Lower = less colour competition with sound dots. |
+| `--playground-tint-rgba` | `28, 14, 8` | Warm tint RGB applied on top of the filtered photo. |
+| `--playground-tint-alpha` | `0.32` | Warm tint opacity. |
+| `--playground-edge-vignette` | `0.55` | Alpha of the inset corner vignette in ::after. |
+
+### Painted foam boundary (v3: ring-clear + atmospheric halo)
+
+The refinement pass v3 restructured the painted boundary because v2's
+strokes accumulated to saturation (drawn outside the canvas clip, no
+trail-fade reached them — they piled up and read as a static thick
+line). The fix has three parts:
+
+1. **Per-frame ring-clear.** Before drawing the new boundary, an
+   even-odd-filled `destination-out` operation erases the previous
+   frame's pixels in the *ring* between the room path and the room
+   bounding box + buffer. In-room pixels (particles, trail-fade
+   content) are untouched because the even-odd rule subtracts them.
+2. **Multi-layer atmospheric halo.** Four progressively wider, fainter
+   strokes ring the room, each breathing with a slightly different
+   phase. This is what makes the boundary read as "atmosphere" instead
+   of "stroke". Phases (0, 0.7, 1.4, 2.1) aren't multiples of 2π so
+   layers shimmer subtly out of sync.
+3. **Inner strokes drawn over the halo.** Outer dark warm + thin beige
+   inner strokes give crisp definition without the halo dominating.
+
+Config object `PAINTED_FOAM_BOUNDARY_OPTS` (v3 values):
+
+```js
+enabled: true, drawStrokes: true, drawBumps: false,
+alphaMul: 1.0,                  // was 0.55
+breathBase: 0.32, breathAmp: 0.14,  // was 0.18 / 0.08
+breathFreq: 0.5,
+haloEnabled: true, haloLayers: 4,
+haloBaseWidth: 10, haloWidthStep: 8,
+haloMaxAlpha: 0.42, haloPhaseStep: 0.7,
+haloRGB: '140, 92, 50',
+ringClearBuffer: 60,            // px of ring cleared each frame
+```
+
+`drawBumps: false` is important — the bezier bumps would double-up
+with the photo's own bumps.
+
+### Ambient brown background (`#ambientBackground`, v3)
+
+Replaces the previously-flat `var(--color-bg)` feel with a clearly-
+visible warm-brown atmospheric layer — visible everywhere the body
+shows through (border around the playground, behind partially-
+transparent menus). v3 changes from v2:
+
+- Base lifted from `oklch(14% 0.024 50)` → `oklch(19% 0.034 45)`
+  (≈ #2a140d). The 14% level was perceptually too close to black at
+  projection distance; 19-21% crosses the threshold where the eye
+  registers warm brown rather than near-black.
+- Now **four** radial gradients (was three): two corner blobs, one
+  wide off-centre bronze accent, one large central halo. All use
+  higher chroma (0.04-0.05 vs previous 0.024-0.04) so the brown
+  reads as brown.
+- `ambientDrift` animation amplitude doubled (was 4-8%, now 6-12%
+  position swing) so motion is genuinely perceivable.
+- `ambientBreath` opacity range widened 0.94..1.00 → 0.90..1.00 for
+  a more noticeable inhale.
+
+Animations run at 28s (drift) + 22s (breath) — non-aligning periods
+so the visual cycle never repeats. GPU-composited, zero JS cost.
+`z-index: -1` keeps it behind everything.
 
 All four share the same vignette recipe:
 ```css

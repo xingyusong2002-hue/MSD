@@ -14,6 +14,19 @@
 </head>
 
 <body>
+    <!-- Ambient deep-brown background layer. Pure CSS — two slowly drifting
+         radial gradients that give the negative space around the playground
+         a "living" warm-brown atmosphere instead of a flat colour. See
+         #ambientBackground in style.css. Sits BEHIND everything (z-index:-1). -->
+    <div id="ambientBackground" aria-hidden="true"></div>
+
+    <!-- Top-view Dead Room photo. Sits BEHIND the canvas (z-index: 0;
+         canvas is auto-stacked above). Default opacity 0 — fades in only
+         when body.in-playground is set (see app.js stage routing). The
+         canvas paints particles + ripples on top of this photo. Size +
+         aspect ratio defined in style.css to match getMapBounds() in
+         app.js — keep both in sync if you swap the photo. -->
+    <div id="playgroundFloor" aria-hidden="true"></div>
     <canvas id="rippleCanvas"></canvas>
 
     <!-- ===== Debug overlay (toggle with D key on the host/projection) ===== -->

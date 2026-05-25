@@ -229,7 +229,8 @@
             // the only thing that lingers. Without the separation, Fill
             // Mode degenerated into "everything visible at once stays
             // visible" — exactly the problem the user reported.
-            trailAlpha: 0.055,          // was 0.012 — main canvas now clears in ~1s
+            trailAlpha: 0.075,          // was 0.055 — non-memory layer fades a touch
+                                          // faster so only activePaintTraces linger
             particleLifeMul: 1.0,        // was 1.80 — particles live like Live Mix
             ringLifeMul: 1.05,           // was 1.35 — rings only slightly longer
             cloudOpacityMul: 0.45,       // NEW — source cloud at 45% in Fill Mode
@@ -358,10 +359,60 @@
     // projection feel like an abstract canvas rather than a top-down room.
     // Now: size = 78% of the smaller window dimension; slightly wider than
     // tall (1.08:1) so it still looks like a room, not a perfect tile.
+    // Painted foam boundary — now a CONFIG object instead of a boolean.
+    // Refinement pass: re-enabled at low alpha to add the "warm brown
+    // dynamic boundary" the brief asked for. The photo already shows
+    // physical wedges (static), so we keep the breathing STROKES (which
+    // make the photo's wedges feel alive) but skip the bezier BUMPS
+    // (which would double-up with the photo's bumps).
+    //
+    //   enabled        — master switch
+    //   drawStrokes    — outer dark + inner beige + offset shadow strokes
+    //   drawBumps      — the rounded bezier foam bumps; keep OFF with photo
+    //   alphaMul       — multiplier on all stroke alphas vs original
+    //   breathBase     — sin offset (idle alpha)
+    //   breathAmp      — sin amplitude
+    //   breathFreq     — sin frequency (rad/sec) — lower is slower
+    const PAINTED_FOAM_BOUNDARY_OPTS = {
+        enabled:     true,
+        drawStrokes: true,
+        drawBumps:   false,
+        // Refinement pass v3: boundary was reading as a static thick line
+        // because strokes drawn OUTSIDE the canvas clip never got faded by
+        // the in-room trail-fade, so they accumulated to saturation within
+        // ~15 frames. drawAcousticFoamBoundary now does a per-frame
+        // ring-clear (destination-out + evenodd fill) before drawing, so
+        // strokes ARE fresh each frame and breathing becomes visible.
+        // With the clear in place, alphas can be much higher than before.
+        alphaMul:    0.70,                // was 1.0 — strokes were too prominent
+        breathBase:  0.26,                // gently perceivable
+        breathAmp:   0.12,
+        breathFreq:  0.5,
+        // Outer atmospheric halo — series of progressively wider, fainter
+        // strokes that ring the room. Each layer breathes with a slightly
+        // different phase so the halo "shimmers" subtly rather than
+        // pulsing in lockstep with the main strokes.
+        haloEnabled: true,
+        haloLayers:  4,
+        haloBaseWidth:    8,             // was 10 — narrower so it doesn't read as bold
+        haloWidthStep:    7,             // was 8
+        haloMaxAlpha:     0.24,          // was 0.42 — muted so it doesn't compete with sound visuals
+        haloPhaseStep:    0.7,
+        // Warm halo colour. Was '140, 92, 50' (read as orange in screenshot);
+        // now a more muted warm brown that blends with the ambient atmosphere.
+        haloRGB:         '110, 76, 46',
+        ringClearBuffer:  60,
+    };
+
+    // Room aspect matches the top-view Dead Room photo (1073x995 = 1.0784).
+    // If you swap the photo, update both this constant AND the matching value
+    // in style.css (#playgroundFloor width calc). Mismatch produces 1-2px
+    // letterbox bars where the canvas room and the photo room edges meet.
+    const ROOM_ASPECT = 1.0784;
     function getMapBounds() {
         const w = window.innerWidth, h = window.innerHeight;
         const size  = Math.min(w, h) * 0.78;
-        const roomW = size * 1.08;
+        const roomW = size * ROOM_ASPECT;
         const roomH = size;
         const cx = w / 2, cy = h / 2;
         return {
@@ -375,14 +426,14 @@
         };
     }
 
-    // Trace the room rectangle as a path on whichever ctx is passed in.
-    // Used both for stroking the boundary AND as the clip path that keeps
-    // every visual layer (rings, particles, paint canvas) inside the room.
-    function drawRoomPath(c) {
+    // Append the rounded-room path commands to whatever the current path
+    // is, WITHOUT calling beginPath. Use this when you need the room
+    // shape as part of a larger composite path — e.g. even-odd fill for
+    // a ring-clear: ctx.beginPath(); ctx.rect(outer); appendRoomPath(ctx);
+    // ctx.fill('evenodd'). If you call drawRoomPath here instead, its
+    // internal beginPath() will wipe the rect you just added.
+    function appendRoomPath(c) {
         const b = getMapBounds();
-        c.beginPath();
-        // Slightly rounded corners so the room reads as architectural,
-        // not as a CSS div.
         const r = 14;
         c.moveTo(b.left + r, b.top);
         c.lineTo(b.right - r, b.top);
@@ -393,6 +444,15 @@
         c.arcTo(b.left, b.bottom, b.left, b.bottom - r, r);
         c.lineTo(b.left, b.top + r);
         c.arcTo(b.left, b.top, b.left + r, b.top, r);
+    }
+
+    // Trace the room rectangle as a NEW path on whichever ctx is passed in.
+    // Used both for stroking the boundary AND as the clip path that keeps
+    // every visual layer (rings, particles, paint canvas) inside the room.
+    // For composite paths (e.g. ring-clear), use appendRoomPath instead.
+    function drawRoomPath(c) {
+        c.beginPath();
+        appendRoomPath(c);
     }
 
     function isInsideRoom(x, y) {
@@ -413,30 +473,83 @@
     // the sound visuals inside the room.
     function drawAcousticFoamBoundary() {
         const b = getMapBounds();
-        // Slow alpha breath, period ≈ 9s. Range 0.13..0.37.
-        const breath = 0.25 + 0.12 * Math.sin(time * 0.7);
+        const opts = PAINTED_FOAM_BOUNDARY_OPTS;
+        const breath = opts.breathBase + opts.breathAmp * Math.sin(time * opts.breathFreq);
         const tickPhase = time * 1.2;
 
         ctx.save();
 
-        // 1. Outer dark warm stroke — the "wall behind the foam".
-        drawRoomPath(ctx);
-        ctx.strokeStyle = `rgba(75, 65, 48, ${(breath * 0.85).toFixed(3)})`;
-        ctx.lineWidth = 6;
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-
-        // 2. Thin beige inner stroke — the foam's lit facing edge.
-        drawRoomPath(ctx);
-        ctx.strokeStyle = `rgba(190, 170, 130, ${(breath * 0.55).toFixed(3)})`;
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-
-        // 3. Repeated ROUNDED foam bumps along each edge — previously sharp
-        // triangular wedges read as "teeth"; the new shape is a flat-topped
-        // cubic-Bezier bump that reads as padded acoustic foam. Each bump
-        // shimmers with its own sine offset so the boundary stays organic.
+        // ----- Ring-clear (CRITICAL: must use appendRoomPath not drawRoomPath) -----
+        // Erase previous-frame boundary pixels in the RING area (outside
+        // the room path, inside the room bounding box + buffer). Without
+        // this, strokes drawn outside the canvas clip accumulate frame
+        // after frame and saturate within ~15 frames — making the
+        // boundary look like a static thick line and hiding the breath.
         //
+        // Technique: even-odd fill with TWO sub-paths in ONE beginPath:
+        //   1. outer rect (bigger than the room + buffer)
+        //   2. inner rounded-room path
+        // even-odd composing fills the RING between them and skips both
+        // the outside-rect area and the inside-room area. destination-out
+        // composing then ERASES only that ring.
+        //
+        // CRITICAL: call appendRoomPath, NOT drawRoomPath. The latter
+        // calls c.beginPath() internally, which would wipe the outer
+        // rect and turn the even-odd fill into "erase the entire room
+        // interior" — exactly the bug that hid the sound visualization
+        // in the previous refinement pass.
+        const buf = opts.ringClearBuffer;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.rect(b.left - buf, b.top - buf, b.width + buf * 2, b.height + buf * 2);
+        appendRoomPath(ctx);
+        ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+        ctx.fill('evenodd');
+        ctx.restore();
+
+        // ----- Atmospheric halo (the "living frame" feel) -----
+        // Series of progressively wider, fainter strokes ringing the room.
+        // Each layer breathes with its own phase so the halo shimmers
+        // subtly rather than pulsing in lockstep. This is what makes the
+        // boundary read as "atmosphere" instead of "stroke".
+        if (opts.haloEnabled) {
+            for (let i = 0; i < opts.haloLayers; i++) {
+                const phase = i * opts.haloPhaseStep;
+                const layerBreath = opts.breathBase + opts.breathAmp *
+                    Math.sin(time * opts.breathFreq + phase);
+                const falloff = 1 - (i / opts.haloLayers);   // 1.0 → 0.25
+                const alpha = layerBreath * opts.haloMaxAlpha * falloff * opts.alphaMul;
+                if (alpha < 0.01) continue;
+                drawRoomPath(ctx);
+                ctx.strokeStyle = `rgba(${opts.haloRGB}, ${alpha.toFixed(3)})`;
+                ctx.lineWidth = opts.haloBaseWidth + i * opts.haloWidthStep;
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+            }
+        }
+
+        if (opts.drawStrokes) {
+            // 1. Outer dark warm stroke — the "wall behind the foam".
+            //    Sits on top of the halo for crisp definition.
+            drawRoomPath(ctx);
+            ctx.strokeStyle = `rgba(75, 65, 48, ${(breath * 0.85 * opts.alphaMul).toFixed(3)})`;
+            ctx.lineWidth = 6;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+
+            // 2. Thin beige inner stroke — the foam's lit facing edge.
+            drawRoomPath(ctx);
+            ctx.strokeStyle = `rgba(190, 170, 130, ${(breath * 0.55 * opts.alphaMul).toFixed(3)})`;
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+        }
+
+        // 3. Repeated ROUNDED foam bumps along each edge. Gated behind
+        // opts.drawBumps — kept OFF when the top-view photo is active
+        // because the photo already shows physical wedges. Re-enabling
+        // would double-up with the photo's own bumps.
+        if (opts.drawBumps) {
         // Why cubic Bezier (bezierCurveTo) and not quadratic:
         //   quadratic with one control point always parabolic → pointy apex.
         //   cubic with two control points pushed inward at equal depth →
@@ -445,8 +558,8 @@
         const wedgeBase = 14;         // half-width along the edge (was 9 — wider/softer)
         const wedgeDepth = 7;         // depth into the room (was 10 — shallower)
         const wedgeSpacing = 30;      // gap between bump centres (was 24)
-        ctx.fillStyle = `rgba(120, 105, 80, ${(breath * 1.0).toFixed(3)})`;
-        ctx.strokeStyle = `rgba(155, 138, 105, ${(breath * 0.45).toFixed(3)})`;
+        ctx.fillStyle = `rgba(120, 105, 80, ${(breath * 1.0 * opts.alphaMul).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(155, 138, 105, ${(breath * 0.45 * opts.alphaMul).toFixed(3)})`;
         ctx.lineWidth = 0.8;          // very subtle outline = highlight at top of foam
 
         // Drawing one rounded bump is the same recipe four ways — only the
@@ -513,17 +626,21 @@
             const shimmer = 1 + 0.18 * Math.sin(tickPhase + y * 0.045 + 4.3);
             drawFoamBump('right', y, wedgeDepth * shimmer);
         }
+        }  // end if opts.drawBumps
 
         // 4. A faint outer "shadow" behind the foam, 3px out from the
         // path — adds depth so the foam reads as physical thickness
-        // rather than a sticker pasted on the canvas.
-        ctx.save();
-        ctx.translate(-2, -2);
-        drawRoomPath(ctx);
-        ctx.strokeStyle = `rgba(20, 17, 13, ${(breath * 0.65).toFixed(3)})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
+        // rather than a sticker pasted on the canvas. Gated by drawStrokes
+        // so the shadow disappears together with its parent strokes.
+        if (opts.drawStrokes) {
+            ctx.save();
+            ctx.translate(-2, -2);
+            drawRoomPath(ctx);
+            ctx.strokeStyle = `rgba(20, 17, 13, ${(breath * 0.65 * opts.alphaMul).toFixed(3)})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        }
 
         ctx.restore();
     }
@@ -579,10 +696,10 @@
     // never overrun the render budget.
     const PAINT_TRACE = {
         cooldownMs:        150,     // per-role gap between stamps (~6.7/sec)
-        baseDurationMs:    5800,    // baseline trace lifetime (~5.8 s)
-        loudBonusMs:       2500,    // up to +2.5 s for loud sounds
+        baseDurationMs:    3800,    // was 5800 — "the room forgets faster"
+        loudBonusMs:       1500,    // was 2500 — loud moments still linger, just less
         movingPenaltyMs:  -1500,    // up to -1.5 s when moving fast
-        minDurationMs:     2500,    // floor — never shorter than this
+        minDurationMs:     2200,    // floor — never shorter than this
         baseRadius:        38,      // base px (volume + motion modulate)
         radiusVolumeBoost: 18,      // px added at full volume
         radiusGrowth:      0.25,    // trace expands 25% over its life
@@ -590,7 +707,7 @@
         baseAlpha:         0.32,    // peak alpha at gradient centre
         fadeStart:         0.15,    // smoothstep edge0 — hold for first 15% of life
         fadeEnd:           1.0,     // smoothstep edge1 — fully transparent at 100%
-        maxAlive:          80,      // hard cap; oldest dropped on overflow
+        maxAlive:          48,      // was 80 — caps "too much remembered at once"
     };
     let activePaintTraces = [];
     const lastPaintTraceAt = { red: 0, green: 0, blue: 0 };
@@ -1247,10 +1364,21 @@
         arcSpanMax: Math.PI * 0.65, // angular spread of innermost (widest) arc
         arcSegments: 22,           // polyline resolution per arc
         arcWobbleAmp: 1.6,         // sine wobble on arc radius (px)
-        baseAlpha: 0.55,           // peak alpha used for the brightest arc
-        overlapFieldAlpha: 0.16,   // peak alpha of the soft elongated oval
-        overlapLengthFactor: 0.42, // oval length = distance * factor
-        overlapWidthFactor:  0.20, // oval width  = distance * factor
+        baseAlpha: 0.70,           // was 0.55 — facing arcs read at projection distance
+        // Interference-fringe stack across the gap (drawCrossingContours).
+        // Five perpendicular bands instead of two — the spacing+falloff
+        // is what makes it read as an interference pattern rather than
+        // "a couple of strokes between dots".
+        contourBands: 5,
+        contourBandSpacingPx: 5,   // axial gap between adjacent bands
+        contourAlphaCap: 0.45,     // was 0.32 — bands more legible
+        // Tiny brightening at the midpoint — a single STROKE circle, no
+        // fill, so it never re-introduces the rejected bubble/blob look.
+        midpointStrokeR: 6,
+        midpointStrokeAlpha: 0.50,
+        overlapFieldAlpha: 0.16,   // (retained — referenced by debug only)
+        overlapLengthFactor: 0.42,
+        overlapWidthFactor:  0.20,
     };
 
     function effectiveVolumeFor(role) {
@@ -1277,30 +1405,51 @@
         const col = `${blend.r},${blend.g},${blend.b}`;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        // 2 contours, slightly offset along the centres axis so they
-        // read as a pair of wavefronts crossing, not a single line.
-        for (let i = 0; i < 2; i++) {
-            const axialOffset = (i - 0.5) * 7;          // -3.5, +3.5 px
+        // Stack of N parallel contours across the gap. Spacing + alpha
+        // falloff away from the centre band is what makes the stack read
+        // as an interference pattern rather than as random strokes.
+        // Centre band is brightest; outer bands fade symmetrically.
+        const bands = INTERFERENCE.contourBands;
+        const spacing = INTERFERENCE.contourBandSpacingPx;
+        const mid = (bands - 1) / 2;
+        for (let i = 0; i < bands; i++) {
+            const distFromMid = Math.abs(i - mid);
+            const fringeFalloff = 1 - distFromMid / (mid + 0.5); // 1 at centre → small at edges
+            const alpha = intensity * INTERFERENCE.contourAlphaCap * fringeFalloff;
+            if (alpha < 0.03) continue;
+            const axialOffset = (i - mid) * spacing;
             const baseX = midX + axisX * axialOffset;
             const baseY = midY + axisY * axialOffset;
-            const alpha = intensity * 0.32;             // capped low — strokes only
-            if (alpha < 0.03) continue;
+            // Centre band slightly thicker so the fringe stack has visible
+            // hierarchy without any band being a heavy line.
+            ctx.lineWidth = 0.7 + fringeFalloff * 0.6;
             ctx.strokeStyle = `rgba(${col},${alpha.toFixed(3)})`;
-            ctx.lineWidth = 0.9;
             ctx.beginPath();
             const segments = 18;
             for (let s = 0; s <= segments; s++) {
                 const u = (s / segments - 0.5) * 2;     // -1..1 across the contour
                 const taper = 1 - Math.abs(u);          // fade to 0 at tips
-                // Sine wobble + small time evolution + per-line phase.
+                // Sine wobble + small time evolution + per-band phase.
                 const wob =
-                    Math.sin(u * Math.PI * 2 + time * 1.4 + i * 1.7) * 2.4
+                    Math.sin(u * Math.PI * 2 + time * 1.4 + i * 1.1) * 2.4
                     + Math.sin(u * Math.PI * 5 + time * 0.9) * 0.9;
                 const x = baseX + perpX * u * halfLen + axisX * wob * taper;
                 const y = baseY + perpY * u * halfLen + axisY * wob * taper;
                 if (s === 0) ctx.moveTo(x, y);
                 else         ctx.lineTo(x, y);
             }
+            ctx.stroke();
+        }
+        // Midpoint brightening — a single small STROKE circle (no fill)
+        // at the geometric midpoint of the two sources. Sits inside the
+        // central fringe and reads as "the sound fields locally interact
+        // here". Stroke-only by design so it cannot become a bubble.
+        const midAlpha = intensity * INTERFERENCE.midpointStrokeAlpha;
+        if (midAlpha >= 0.04) {
+            ctx.strokeStyle = `rgba(${col},${midAlpha.toFixed(3)})`;
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.arc(midX, midY, INTERFERENCE.midpointStrokeR, 0, Math.PI * 2);
             ctx.stroke();
         }
         ctx.restore();
@@ -1945,6 +2094,16 @@
         stageToolbarBtns.forEach(b => b.classList.toggle('active', b.dataset.stage === experienceStage));
         toggleHostStageControls();
 
+        // Gate the top-view playground photo's visibility. The photo fades
+        // in only when we're in the live Dead Room playing phase; in every
+        // other stage (including transitions between menus) the body class
+        // is removed so #playgroundFloor stays at opacity 0. This is what
+        // prevents the photo from flashing through during landing → lobby
+        // → playing handoffs. See style.css `.in-playground` for the
+        // transition curve.
+        const inPlayground = (experienceStage === 'dead-room' && s.phase === 'playing' && myRole);
+        document.body.classList.toggle('in-playground', !!inPlayground);
+
         if (!myRole) {
             // No role yet — keep them on the Landing screen so they can choose.
         } else if (experienceStage === 'waiting-room') {
@@ -2320,25 +2479,62 @@
         animationId = requestAnimationFrame(render);
         const w = window.innerWidth, h = window.innerHeight;
         time += 0.016;
-        // Trail fade — colour changed from cool near-black (5,5,8) to a
-        // very dark warm brown (18,14,11). Accumulates over frames as
-        // the room's ambient tone, so the projection no longer feels
-        // like a pure black void.
-        const mc = getModeConfig();
-        ctx.fillStyle = `rgba(18,14,11,${mc.trailAlpha})`;
-        ctx.fillRect(0, 0, w, h);
+        // =========================================================================
+        // LAYER-INTENT CONTRACT — read before editing any of the visual integration
+        // =========================================================================
+        // Below is the strict draw order. NEVER place a "context" layer (ambient,
+        // photo, tint, vignette, boundary) above an "interaction" layer (Fill
+        // traces, particles, rings, source dots). Doing so suppressed the sound
+        // visualization in a previous refinement pass and the project's most
+        // critical visual element disappeared.
+        //
+        //   CONTEXT (background, contextual):
+        //     1. #ambientBackground (CSS, z=-1)             — warm brown drift
+        //     2. #playgroundFloor (CSS, z=0)                 — top-view photo
+        //          ├─ ::before    photo + filter darkening
+        //          └─ ::after     warm tint + inset vignette
+        //     3. trail-fade (canvas, destination-out)        — in-room
+        //
+        //   INTERACTION (foreground, never suppressed):
+        //     4. paintCanvas blit (Fill Mode memory traces)
+        //     5. drawSourceCloud, maybeSpawnRing, drawRings
+        //     6. drawWaveInteractions (interference contours)
+        //     7. drawParticles
+        //     8. drawSourceDot — most prominent, always on top inside the room
+        //
+        //   FRAME (drawn AFTER clip restore, in the border area):
+        //     9. drawAcousticFoamBoundary — ring-clear + atmospheric halo
+        //        MUST use appendRoomPath (not drawRoomPath) in its ring-clear
+        //        even-odd fill, or it will erase the entire room interior.
+        //
+        //   UI (CSS, on top of everything):
+        //    10. .screen menus (z=100), HUD (z=1000)
+        // =========================================================================
 
-        // Vignette — soft radial darkening that focuses attention on the
-        // centre room. Painted per-frame as a thin overlay; cost is one
-        // gradient + one rect, negligible. Colour is even warmer than the
-        // trail (8,5,3) so corners darken without going grey.
-        const vMax = Math.max(w, h);
-        const vMin = Math.min(w, h);
-        const vg = ctx.createRadialGradient(w/2, h/2, vMin * 0.30, w/2, h/2, vMax * 0.68);
-        vg.addColorStop(0, 'rgba(8, 5, 3, 0)');
-        vg.addColorStop(1, 'rgba(8, 5, 3, 0.55)');
-        ctx.fillStyle = vg;
+        // Trail fade — now ERASES rather than paints over.
+        // The Dead Room top-view photo sits as a CSS background BEHIND the
+        // canvas (see #playgroundFloor in style.css). If we used the old
+        // "fill with semi-transparent dark" approach, the canvas drawing
+        // surface would asymptote to opaque within ~1 second and bury the
+        // photo. globalCompositeOperation = 'destination-out' uses the
+        // fill's ALPHA to subtract from existing pixels instead: each
+        // particle fades exponentially toward zero alpha, eventually
+        // gone, and the photo behind shows cleanly through the empty
+        // pixels. Same visual rate as before (particles decay over ~1s);
+        // wildly different compositing semantics.
+        //
+        // The vignette was removed in this pass — it darkened the room's
+        // corners with a radial overlay, which would have muddied the
+        // photo. If you want a vignette back, do it as a CSS overlay on
+        // #playgroundFloor instead, not as a per-frame canvas fill.
+        const mc = getModeConfig();
+        ctx.save();
+        drawRoomPath(ctx);
+        ctx.clip();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = `rgba(0,0,0,${mc.trailAlpha})`;  // colour irrelevant in destination-out
         ctx.fillRect(0, 0, w, h);
+        ctx.restore();
 
         if (myRole && myRole !== 'host') {
             // Defensive resume in case the keep-alive interval was lost.
@@ -2467,9 +2663,12 @@
         drawParticles();
 
         ctx.restore();
-        // The boundary itself draws AFTER the clip restore so the stroke
-        // sits crisply on top of any colour bleeding to the edge.
-        drawRoomBoundary();
+        // The painted foam-wedge boundary is now OPTIONAL. The top-view
+        // Dead Room photo (#playgroundFloor in style.css) already shows
+        // the real wedges, so painting another set on top creates a
+        // "two foams" visual collision. Flip this flag to true if you
+        // ever swap back to a photo-less playground.
+        if (PAINTED_FOAM_BOUNDARY_OPTS.enabled) drawRoomBoundary();
 
         // Centre region. Mode-specific:
         //   • Fill Mode: broad, soft accumulation field — "the room remembers"
