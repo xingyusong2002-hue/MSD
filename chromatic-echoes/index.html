@@ -537,19 +537,133 @@ ngrok http 8080</code></pre>
         </button>
     </div>
 
-    <!-- ===== SCREEN: Archive (museum walkthrough stage 4) ===== -->
+    <!-- ===== SCREEN: Archive (museum walkthrough stage 4) =====
+         Echo Memory Map concept: the room "remembers" what sound made
+         visible — micro-sounds, movement-while-sounding, moments of
+         shared attention. The map below is currently a placeholder
+         visual (SVG, no session data); when real per-session trace
+         data is hooked up, replace the path/circle d-values and the
+         three chips with computed values — see the data-* attributes
+         on .echo-memory-map for the wiring spec. -->
     <div id="screenArchive" class="screen">
-        <div class="screen-content">
+        <div class="screen-content screen-content--archive">
             <span class="stage-tag">Stage 4 / 4 · Echo Archive</span>
-            <h2 class="screen-title">What did the room sound like?</h2>
-            <p class="screen-subtitle">A trace of your group's voices</p>
-            <div class="walkthrough-body">
-                <div id="archiveTracePlaceholder" class="archive-trace">
-                    <p class="archive-trace-hint">Your group's sound trace will appear here.</p>
-                </div>
-                <p class="reflection">Take a moment to reflect:<br>
-                   <em>What surprised you most about silence?</em></p>
+            <h2 class="screen-title">What did the room remember?</h2>
+            <p class="screen-subtitle">A trace of your micro-sounds, movements, and shared listening.</p>
+
+            <!-- ===== Echo Memory Map (placeholder visual) =====
+                 SVG drawn at viewBox 0 0 540 360 — fluid via width:100%.
+                 Three abstract movement paths (R/G/B), each with small
+                 particle clusters along their length for the micro-sounds
+                 the path "passed through". Overlap regions use
+                 mix-blend-mode: screen on coloured circles to produce
+                 the subtle blended glow without any JS. -->
+            <div class="echo-memory-map" data-archive-source="placeholder" aria-label="Echo Memory Map">
+                <svg viewBox="0 0 540 360" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true">
+                    <!-- Faint top-view room outline + subtle grid -->
+                    <defs>
+                        <pattern id="archiveGrid" width="36" height="36" patternUnits="userSpaceOnUse">
+                            <path d="M 36 0 L 0 0 0 36" fill="none" stroke="rgba(200,170,150,0.05)" stroke-width="0.5"/>
+                        </pattern>
+                    </defs>
+                    <rect x="40" y="30" width="460" height="300" rx="14" ry="14"
+                          fill="rgba(28,16,11,0.55)" stroke="rgba(160,120,90,0.25)" stroke-width="1.2"/>
+                    <rect x="40" y="30" width="460" height="300" rx="14" ry="14" fill="url(#archiveGrid)"/>
+
+                    <!-- Three movement paths (placeholder shapes —
+                         shape is intentionally non-symmetric so they read
+                         as real recorded movement, not graphic design). -->
+                    <path d="M 90 90 C 180 80, 220 200, 300 180 S 420 200, 460 140"
+                          fill="none" stroke="rgba(230,80,80,0.55)" stroke-width="1.6" stroke-linecap="round"
+                          class="echo-path echo-path--red"/>
+                    <path d="M 460 80 C 380 130, 360 230, 240 240 S 110 240, 80 290"
+                          fill="none" stroke="rgba(120,210,140,0.55)" stroke-width="1.6" stroke-linecap="round"
+                          class="echo-path echo-path--green"/>
+                    <path d="M 100 270 C 200 250, 240 130, 320 150 S 440 250, 470 270"
+                          fill="none" stroke="rgba(110,160,235,0.55)" stroke-width="1.6" stroke-linecap="round"
+                          class="echo-path echo-path--blue"/>
+
+                    <!-- Tiny particle clusters along each path —
+                         each cluster = a small audible action (micro-sound
+                         the mic picked up at that moment). Positions are
+                         hand-placed near the path curves above. -->
+                    <g class="echo-cluster echo-cluster--red" fill="rgba(230,80,80,0.7)">
+                        <circle cx="110" cy="92"  r="1.8"/>
+                        <circle cx="120" cy="98"  r="1.2"/>
+                        <circle cx="118" cy="86"  r="1.4"/>
+                        <circle cx="260" cy="195" r="2.0"/>
+                        <circle cx="268" cy="188" r="1.3"/>
+                        <circle cx="252" cy="200" r="1.5"/>
+                        <circle cx="440" cy="148" r="1.7"/>
+                        <circle cx="432" cy="155" r="1.1"/>
+                    </g>
+                    <g class="echo-cluster echo-cluster--green" fill="rgba(120,210,140,0.7)">
+                        <circle cx="440" cy="92"  r="1.6"/>
+                        <circle cx="430" cy="100" r="1.2"/>
+                        <circle cx="290" cy="235" r="2.0"/>
+                        <circle cx="298" cy="244" r="1.4"/>
+                        <circle cx="282" cy="228" r="1.2"/>
+                        <circle cx="115" cy="278" r="1.6"/>
+                        <circle cx="108" cy="285" r="1.2"/>
+                    </g>
+                    <g class="echo-cluster echo-cluster--blue" fill="rgba(110,160,235,0.7)">
+                        <circle cx="125" cy="268" r="1.7"/>
+                        <circle cx="135" cy="262" r="1.2"/>
+                        <circle cx="320" cy="155" r="2.1"/>
+                        <circle cx="312" cy="148" r="1.4"/>
+                        <circle cx="328" cy="162" r="1.3"/>
+                        <circle cx="455" cy="265" r="1.6"/>
+                    </g>
+
+                    <!-- Overlap glow — where two paths cross, a soft blended
+                         circle marks "moment of shared attention". screen
+                         blend mode makes overlapping colours brighten. -->
+                    <g class="echo-overlap">
+                        <circle cx="275" cy="200" r="22" fill="rgba(240,200,160,0.20)"/>
+                        <circle cx="320" cy="158" r="18" fill="rgba(220,210,180,0.18)"/>
+                        <circle cx="118" cy="282" r="16" fill="rgba(200,210,220,0.16)"/>
+                    </g>
+                </svg>
+                <p class="archive-trace-hint archive-trace-hint--placeholder">
+                    Placeholder map — real session trace will replace this when recording is enabled.
+                </p>
             </div>
+
+            <!-- Interpretation chips — name what the map shows. -->
+            <div class="archive-chips" role="list">
+                <div class="archive-chip" role="listitem">
+                    <span class="archive-chip-dot archive-chip-dot--micro"></span>
+                    <div>
+                        <div class="archive-chip-label">Micro sounds</div>
+                        <div class="archive-chip-desc">Small sounds became visible.</div>
+                    </div>
+                </div>
+                <div class="archive-chip" role="listitem">
+                    <span class="archive-chip-dot archive-chip-dot--motion"></span>
+                    <div>
+                        <div class="archive-chip-label">Movement traces</div>
+                        <div class="archive-chip-desc">Sound followed bodies.</div>
+                    </div>
+                </div>
+                <div class="archive-chip" role="listitem">
+                    <span class="archive-chip-dot archive-chip-dot--shared"></span>
+                    <div>
+                        <div class="archive-chip-label">Shared moments</div>
+                        <div class="archive-chip-desc">Colours overlapped when people listened near each other.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Caption — explains what the map IS and ISN'T. -->
+            <p class="archive-caption">
+                This is not a recording of sound itself, but a memory of what sound made noticeable: small actions, moving bodies, and moments of shared attention.
+            </p>
+
+            <p class="reflection">
+                Take a moment to reflect:<br>
+                <em>What did silence reveal about others?</em>
+            </p>
+
             <div id="hostArchiveControls" class="host-controls hidden">
                 <button id="btnArchiveNewSession" class="btn btn-primary">
                     <span class="btn-text">Start a new session</span>

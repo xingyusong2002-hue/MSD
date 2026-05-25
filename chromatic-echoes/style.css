@@ -2263,19 +2263,149 @@ body.in-playground #playgroundFloor {
     font-size: 0.85rem;
 }
 
-.archive-trace {
-    border: 1px dashed var(--glass-border);
-    border-radius: var(--radius);
-    padding: 28px 16px;
-    background: var(--glass-bg);
-    margin: 1em 0;
+/* ---- Echo Archive (Stage 4) — refinement pass ----
+   The archive presents the room's "memory" of the session:
+     1. Echo Memory Map — placeholder SVG of three movement paths,
+        with particle clusters along them (micro-sounds the path
+        passed through) and overlap glows (moments of shared
+        listening). When real session data is wired in, replace the
+        inline SVG paths + circles + overlap circles with computed
+        per-session values; the visual language stays the same.
+     2. Three interpretation chips — name what the map shows so
+        visitors don't have to guess.
+     3. Caption — explains the map IS a memory of what sound made
+        noticeable, NOT a recording of sound itself.
+     4. Reflection — quiet italic prompt to take with them.
+   Style: museum-quiet, dark warm, glass-card, no dashboard clutter. */
+
+.screen-content--archive {
+    max-width: 720px;        /* slightly wider than default so the map breathes */
 }
 
-.archive-trace-hint {
+.echo-memory-map {
+    margin: 1.4em 0 0.8em 0;
+    padding: 14px;
+    border-radius: var(--radius);
+    background:
+        radial-gradient(ellipse at center,
+            rgba(28, 16, 11, 0.55) 0%,
+            rgba(14,  7,  5, 0.85) 90%);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+        inset 0 0 60px rgba(0, 0, 0, 0.35),
+        0 8px 30px rgba(0, 0, 0, 0.40);
+}
+
+.echo-memory-map svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    /* isolate so the screen blend on overlap circles only mixes with
+       the map's own contents, not anything behind the screen. */
+    isolation: isolate;
+}
+
+/* Movement paths — slight glow via drop-shadow filter so the lines
+   read as faint light traces, not flat strokes. */
+.echo-path {
+    filter: drop-shadow(0 0 4px currentColor);
+    opacity: 0.85;
+}
+.echo-path--red   { color: rgba(230,  80,  80, 0.55); }
+.echo-path--green { color: rgba(120, 210, 140, 0.55); }
+.echo-path--blue  { color: rgba(110, 160, 235, 0.55); }
+
+/* Particle clusters — small dots representing micro-sounds the path
+   passed through. Subtle glow makes them read as "audible moments". */
+.echo-cluster circle {
+    filter: drop-shadow(0 0 2px currentColor);
+}
+.echo-cluster--red   circle { color: rgba(230,  80,  80, 0.7); }
+.echo-cluster--green circle { color: rgba(120, 210, 140, 0.7); }
+.echo-cluster--blue  circle { color: rgba(110, 160, 235, 0.7); }
+
+/* Overlap glows — soft warm circles where two paths cross. Screen
+   blend lifts overlapping pixels toward brightness, suggesting
+   shared listening moments. */
+.echo-overlap circle {
+    mix-blend-mode: screen;
+    filter: blur(6px);
+}
+
+.archive-trace-hint--placeholder {
     color: var(--color-text-dim);
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     text-align: center;
-    margin: 0;
+    margin: 10px 0 0 0;
+    font-style: italic;
+    opacity: 0.55;
+    letter-spacing: 0.02em;
+}
+
+/* ---- Interpretation chips ----
+   Grid auto-fits 1 / 2 / 3 wide depending on screen width.
+   Each chip is a small glass card with a coloured dot + label +
+   description. */
+.archive-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+    margin: 1.2em 0 0.8em 0;
+}
+
+.archive-chip {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    text-align: left;
+}
+
+.archive-chip-dot {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 50%;
+    box-shadow: 0 0 8px currentColor;
+}
+
+/* Dot colours — each one hints at what its chip's concept refers to.
+   Micro = warm sand (the cluster particles), Motion = soft red-orange
+   (the brightest movement line), Shared = pale cream (the overlap
+   glow's hue). */
+.archive-chip-dot--micro  { background: rgba(220, 185, 155, 0.85); color: rgba(220, 185, 155, 0.85); }
+.archive-chip-dot--motion { background: rgba(230,  90,  85, 0.85); color: rgba(230,  90,  85, 0.85); }
+.archive-chip-dot--shared { background: rgba(240, 215, 180, 0.85); color: rgba(240, 215, 180, 0.85); }
+
+.archive-chip-label {
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    letter-spacing: 0.04em;
+    color: var(--color-text);
+    margin-bottom: 2px;
+}
+.archive-chip-desc {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: var(--color-text-dim);
+}
+
+/* Caption — explains the map's nature. Sits between chips and
+   reflection. Italic Newsreader is the project's "quote" voice. */
+.archive-caption {
+    font-family: var(--font-italic);
+    font-style: italic;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: var(--color-text-dim);
+    text-align: center;
+    max-width: 56ch;
+    margin: 1.0em auto 0.6em auto;
+    opacity: 0.78;
 }
 
 /* Floating host-only stage toolbar (visible inside the dead-room stage).
