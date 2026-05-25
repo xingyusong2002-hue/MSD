@@ -210,6 +210,84 @@ body {
     100% { opacity: 0.90; }
 }
 
+/* ---- Refinement pass v4: blurred floating blobs ----
+   Two pseudo-elements on #ambientBackground — each is a huge,
+   heavily-blurred warm-brown blob that drifts + scales + rotates
+   very slowly. The base gradients (the radial-gradient layers on
+   the parent #ambientBackground above) provide the warm-brown
+   colour field; these blobs add the "milky / hazy / wave-like
+   slow drift" feel the brief asked for.
+
+   Pseudo-elements inherit the parent's stacking context (z-index:
+   -1), so they CANNOT come above the sound visualisation — they
+   are physically incapable of breaking the layer-order contract.
+
+   Implementation choices:
+     - filter: blur(80-100px) — turns the radial-gradient's soft
+       edge into vapour. The browser caches the blurred raster
+       once, then animates the cheap transform — GPU-friendly.
+     - Inset -30% — blobs extend 30% beyond the viewport on all
+       sides so the transform translation never reveals an edge.
+     - Different animation periods (52s + 67s) — gcd is small, so
+       the combined visual cycle is ~58 minutes long. Visitor will
+       never see it loop.
+     - Two blobs of different colour (warm brown vs lighter muted)
+       at different scales/phases — when they cross paths, low-alpha
+       additive overlap creates a brief subtle warm glow then fades.
+     - opacity keyframes within each animation — the blobs breathe
+       independently of their transform drift, doubling the
+       perceived organic motion at zero extra cost.
+     - pointer-events: none (inherited) — never intercepts input. */
+
+#ambientBackground::before,
+#ambientBackground::after {
+    content: '';
+    position: absolute;
+    inset: -30%;
+    pointer-events: none;
+    will-change: transform, opacity;  /* hint GPU compositing */
+}
+
+/* Blob 1 — deep warm brown, larger, slower */
+#ambientBackground::before {
+    background: radial-gradient(ellipse 55% 45% at 38% 42%,
+        rgba(110, 70, 55, 0.10) 0%,
+        rgba(70, 28, 18, 0.07) 35%,
+        rgba(40, 18, 12, 0.03) 60%,
+        transparent 78%);
+    filter: blur(90px);
+    animation: ambientBlob1 52s ease-in-out infinite alternate;
+}
+
+/* Blob 2 — slightly lighter muted warm, smaller, opposite drift.
+   Stays warm-brown family (no pink/blue per the brief). */
+#ambientBackground::after {
+    background: radial-gradient(ellipse 48% 52% at 62% 58%,
+        rgba(160, 120, 110, 0.06) 0%,
+        rgba(110, 70, 55, 0.04) 40%,
+        rgba(60, 28, 18, 0.02) 65%,
+        transparent 82%);
+    filter: blur(110px);
+    animation: ambientBlob2 67s ease-in-out infinite alternate;
+}
+
+/* Drift + scale + rotate + opacity breathing.
+   Translation kept ≤ 10% so blobs stay roughly in-frame.
+   Rotation kept ≤ 18° so motion reads as "soft wash" not "spinning".
+   Scale kept 0.92..1.18 so size pulse is perceivable but not pumping. */
+@keyframes ambientBlob1 {
+    0%   { transform: translate(-6%, -4%) scale(0.96) rotate(0deg);   opacity: 0.55; }
+    33%  { transform: translate(4%, 6%)   scale(1.12) rotate(8deg);   opacity: 0.85; }
+    66%  { transform: translate(7%, -3%)  scale(1.04) rotate(-6deg);  opacity: 0.70; }
+    100% { transform: translate(-3%, 5%)  scale(1.16) rotate(14deg);  opacity: 0.90; }
+}
+@keyframes ambientBlob2 {
+    0%   { transform: translate(5%, 5%)   scale(1.10) rotate(0deg);    opacity: 0.65; }
+    40%  { transform: translate(-7%, 3%)  scale(0.95) rotate(-12deg);  opacity: 0.88; }
+    75%  { transform: translate(-2%, -6%) scale(1.15) rotate(6deg);    opacity: 0.72; }
+    100% { transform: translate(6%, -3%)  scale(1.02) rotate(-3deg);   opacity: 0.85; }
+}
+
 /* ---- Playground floor (top-view Dead Room photo) ----
    The actual playable area. Sized to MATCH getMapBounds() in app.js so
    the photo's wooden-wedge frame aligns with the canvas's clip
