@@ -4,12 +4,20 @@
   "description": "Cooperative sound-and-colour experience for the TU Delft Dead Room (MSD studio).",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:pm2": "pm2 start ecosystem.config.js",
+    "stop:pm2": "pm2 stop chromatic-echoes",
+    "restart:pm2": "pm2 restart chromatic-echoes",
+    "logs:pm2": "pm2 logs chromatic-echoes --lines 100",
+    "status:pm2": "pm2 status"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "pm2": "^7.0.1"
   }
 }
