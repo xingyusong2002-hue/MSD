@@ -249,69 +249,73 @@ body {
     mix-blend-mode: screen;
 }
 
-/* ::before — DIAGONAL warm ribbon bands.
-   The 115deg linear-gradient with non-uniform soft stops creates
-   the "long blurred diagonal light bands moving across a dark
-   background" feel of the reference. rotate(-4deg) tilts the
-   element's own axis so the bands sit slightly off the gradient
-   angle — gives organic skew rather than mechanical stripe. */
+/* ::before — DIAGONAL warm ribbon bands (v8 tuning).
+   The 118deg linear-gradient with non-uniform soft stops creates
+   long diagonal warm bands. Tuned for "readable but subtle":
+     - blur 22px (was 34) — preserves enough edge contrast that
+       the alternating stops form perceptible bands instead of
+       dissolving into uniform tint.
+     - opacity 0.95 (was 0.85) — bands are visible, not hinted.
+     - stop alphas bumped ~25% — warm cream stops 0.07 / 0.055
+       instead of 0.055 / 0.040.
+     - rotate(-6deg) tilts the element off the gradient angle for
+       organic skew. */
 #ambientBackground::before {
     inset: -35%;
     background:
-        linear-gradient(115deg,
+        linear-gradient(118deg,
             transparent 0%,
-            transparent 28%,
-            rgba(220, 185, 155, 0.055) 34%,
-            rgba(150,  90,  65, 0.035) 39%,
-            transparent 47%,
+            transparent 24%,
+            rgba(220, 185, 155, 0.07) 31%,
+            rgba(150,  95,  70, 0.045) 37%,
+            transparent 46%,
             transparent 54%,
-            rgba(200, 150, 125, 0.040) 60%,
-            rgba(100,  48,  32, 0.025) 66%,
-            transparent 75%,
+            rgba(205, 160, 135, 0.055) 61%,
+            rgba(105,  55,  38, 0.030) 68%,
+            transparent 78%,
             transparent 100%);
-    filter: blur(34px);
-    opacity: 0.85;
-    transform: rotate(-4deg) scale(1.15);
-    animation: ambientRibbons 55s ease-in-out infinite alternate;
+    filter: blur(22px);
+    opacity: 0.95;
+    transform: rotate(-6deg) scale(1.18);
+    animation: ambientRibbons 36s ease-in-out infinite alternate;
 }
 
 /* ::after — very soft warm haze blobs underneath the ribbons.
-   Two radial gradients with low alpha + heavy blur — adds the
-   ambient warmth so the ribbons read as bands of light passing
-   through warm air rather than stripes on a flat backdrop. */
+   Slightly toned down (opacity 0.65 → 0.55) so it supports the
+   ribbons rather than competing with them. Faster period (70s →
+   52s) so the two rhythms decouple without aligning. */
 #ambientBackground::after {
     inset: -25%;
     background:
         radial-gradient(ellipse 70% 55% at 25% 40%,
-            rgba(160, 105, 85, 0.075) 0%,
-            rgba( 90,  42, 28, 0.035) 45%,
+            rgba(160, 105, 85, 0.070) 0%,
+            rgba( 90,  42, 28, 0.030) 45%,
             transparent 75%),
         radial-gradient(ellipse 65% 50% at 80% 65%,
-            rgba(190, 145, 120, 0.055) 0%,
-            rgba( 95,  48,  34, 0.028) 48%,
+            rgba(190, 145, 120, 0.050) 0%,
+            rgba( 95,  48,  34, 0.025) 48%,
             transparent 78%);
-    filter: blur(85px);
-    opacity: 0.65;
-    animation: ambientMistSlow 70s ease-in-out infinite alternate;
+    filter: blur(80px);
+    opacity: 0.55;
+    animation: ambientMistSlow 52s ease-in-out infinite alternate;
 }
 
-/* Ribbon drift — large vw translation so the bands sweep across
-   the screen visibly. Rotation stays in the -7..-2deg range so the
-   ribbons drift diagonally without spinning. Scale grows slightly
-   so they feel like distant air-flow approaching, not bobbing. */
+/* Ribbon drift — faster period (36s) and tightened translation
+   range (-10vw → 18vw) means bands cross ~0.9 vw/sec, just above
+   the perceptual threshold for motion-reading. Rotation -7 → -2
+   keeps the band trajectory diagonal-flowing, not rocking. */
 @keyframes ambientRibbons {
-    0%   { transform: translate3d(-12vw, -4vh, 0) rotate(-7deg) scale(1.16); }
-    35%  { transform: translate3d(  4vw,  3vh, 0) rotate(-3deg) scale(1.22); }
-    70%  { transform: translate3d( 13vw, -2vh, 0) rotate(-6deg) scale(1.18); }
-    100% { transform: translate3d( 22vw,  5vh, 0) rotate(-2deg) scale(1.24); }
+    0%   { transform: translate3d(-10vw, -3vh, 0) rotate(-7deg) scale(1.16); }
+    50%  { transform: translate3d(  8vw,  2vh, 0) rotate(-4deg) scale(1.22); }
+    100% { transform: translate3d( 18vw,  5vh, 0) rotate(-2deg) scale(1.20); }
 }
 
 /* Slow background mist — smaller translations + opacity breathing
    to add another rhythm so the cycle never visibly repeats. */
 @keyframes ambientMistSlow {
-    0%   { transform: translate3d( 4vw,  2vh, 0) scale(1.05); opacity: 0.50; }
-    50%  { transform: translate3d(-5vw, -3vh, 0) scale(1.13); opacity: 0.70; }
-    100% { transform: translate3d( 8vw,  4vh, 0) scale(1.08); opacity: 0.58; }
+    0%   { transform: translate3d( 4vw,  2vh, 0) scale(1.05); opacity: 0.48; }
+    50%  { transform: translate3d(-5vw, -3vh, 0) scale(1.13); opacity: 0.62; }
+    100% { transform: translate3d( 8vw,  4vh, 0) scale(1.08); opacity: 0.54; }
 }
 
 
