@@ -186,49 +186,18 @@ body {
        accent in the upper-right that drifts independently. Each blob
        uses higher chroma (0.04-0.05 vs previous 0.024-0.04) so brown
        reads as brown, not as a missing colour. */
+    /* Refinement pass v6: parent now carries ONLY a dark base + a
+       very soft central vignette. The atmospheric haze comes from
+       the ::before and ::after pseudo-elements below, which use
+       mix-blend-mode: screen to LIFT the dark base toward warm
+       cream — that lift IS the visible drift. Previous versions
+       loaded the parent with 4 heavy radial gradients, which read
+       as a solid tinted background rather than haze. */
     background:
-        radial-gradient(ellipse 75% 65% at 28% 32%,
-            oklch(30% 0.052 50 / 0.78) 0%,
-            oklch(22% 0.038 48 / 0.40) 40%,
-            transparent 78%),
-        radial-gradient(ellipse 65% 75% at 78% 72%,
-            oklch(28% 0.046 45 / 0.70) 0%,
-            oklch(21% 0.034 45 / 0.32) 45%,
-            transparent 82%),
-        /* Wide off-centre accent — upper-right warm bronze halo. */
-        radial-gradient(ellipse 45% 55% at 85% 18%,
-            oklch(26% 0.045 40 / 0.45) 0%,
-            oklch(20% 0.030 45 / 0.18) 55%,
-            transparent 90%),
-        /* Large central halo behind the playground — slow breathe via
-           the second animation. Pulses around the room. */
-        radial-gradient(circle 95% at 50% 50%,
-            oklch(24% 0.040 50 / 0.55) 0%,
-            oklch(19% 0.030 48 / 0.22) 50%,
-            transparent 88%),
-        oklch(21% 0.038 45);  /* deep warm brown base — ≈ #2f1611, clearly brown not black */
-    /* Two parallel animations: drift moves the gradient positions;
-       breath ramps opacity. Periods (28s + 22s) are non-aligning so
-       the visual cycle never repeats. The drift amplitude is larger
-       this pass so motion is genuinely perceivable. */
-    animation:
-        ambientDrift  28s ease-in-out infinite alternate,
-        ambientBreath 22s ease-in-out infinite;
-}
-
-@keyframes ambientDrift {
-    0%   { background-position:  0% 0%,   100% 100%,  100% 0%,  50% 50%, 0 0; }
-    50%  { background-position: 12% -6%,   88% 94%,    92% 8%,  53% 48%, 0 0; }
-    100% { background-position: -6% 8%,   106% 106%,  108% -6%, 47% 52%, 0 0; }
-}
-
-/* Global luminance breathe — slightly wider amplitude than v2
-   (0.88..1.00 instead of 0.94..1.00) so the "inhale" is perceivable
-   without becoming a discrete animation. */
-@keyframes ambientBreath {
-    0%   { opacity: 0.90; }
-    50%  { opacity: 1.00; }
-    100% { opacity: 0.90; }
+        radial-gradient(ellipse at center,
+            rgba(34, 15, 10, 0.92) 0%,
+            rgba(12,  5,  4, 1.00) 75%),
+        #100604;  /* deep almost-black warm brown — the haze sits on top of this */
 }
 
 /* ---- Refinement pass v4: blurred floating blobs ----
@@ -260,53 +229,81 @@ body {
        perceived organic motion at zero extra cost.
      - pointer-events: none (inherited) — never intercepts input. */
 
+/* ---- Refinement pass v6: luminous haze layers ----
+   Two pseudo-elements as huge blurred warm-cream haze layers using
+   mix-blend-mode: screen — they LIFT the dark base toward warm
+   light, never darken anything. That lift is what reads as soft
+   milky atmospheric drift.
+
+   Safety (read this before changing): mix-blend-mode only blends an
+   element with what's BEHIND it in the SAME stacking context. With
+   isolation: isolate on body, these blobs blend only with
+   #ambientBackground's own dark base. #playgroundFloor (z=1) and
+   #rippleCanvas (z=2) stack above this group — sound visuals are
+   physically untouched by the blend.
+
+   Sizes use vmax (the larger of vw/vh) so the haze covers wide
+   monitors and tall mobiles alike. Translation uses vw/vh so blobs
+   sweep across viewport-scale distances, sweeping through the
+   empty left/right areas around the central playground. */
 #ambientBackground::before,
 #ambientBackground::after {
     content: '';
     position: absolute;
-    inset: -30%;
     pointer-events: none;
-    will-change: transform, opacity;  /* hint GPU compositing */
+    will-change: transform;        /* hint GPU compositing */
+    mix-blend-mode: screen;        /* only lifts the dark base */
 }
 
-/* Blob 1 — deep warm brown, larger, slower */
+/* Haze A — larger warmer-cream, sweeps from upper-left across right. */
 #ambientBackground::before {
-    background: radial-gradient(ellipse 55% 45% at 38% 42%,
-        rgba(110, 70, 55, 0.10) 0%,
-        rgba(70, 28, 18, 0.07) 35%,
-        rgba(40, 18, 12, 0.03) 60%,
+    width: 90vmax;
+    height: 70vmax;
+    left: -20vmax;
+    top: 5vmax;
+    background: radial-gradient(ellipse at center,
+        rgba(210, 170, 145, 0.11) 0%,
+        rgba(140,  85,  65, 0.07) 35%,
+        rgba( 75,  32,  22, 0.03) 62%,
         transparent 78%);
-    filter: blur(90px);
-    animation: ambientBlob1 52s ease-in-out infinite alternate;
+    filter: blur(70px);
+    opacity: 0.75;
+    animation: ambientMistA 48s ease-in-out infinite alternate;
 }
 
-/* Blob 2 — slightly lighter muted warm, smaller, opposite drift.
-   Stays warm-brown family (no pink/blue per the brief). */
+/* Haze B — slightly smaller warm tan, sweeps from lower-right.
+   Different size/position/period — never aligns with Haze A. */
 #ambientBackground::after {
-    background: radial-gradient(ellipse 48% 52% at 62% 58%,
-        rgba(160, 120, 110, 0.06) 0%,
-        rgba(110, 70, 55, 0.04) 40%,
-        rgba(60, 28, 18, 0.02) 65%,
-        transparent 82%);
-    filter: blur(110px);
-    animation: ambientBlob2 67s ease-in-out infinite alternate;
+    width: 80vmax;
+    height: 85vmax;
+    right: -25vmax;
+    bottom: -15vmax;
+    background: radial-gradient(ellipse at center,
+        rgba(185, 135, 120, 0.090) 0%,
+        rgba(115,  62,  48, 0.055) 42%,
+        rgba( 50,  20,  14, 0.025) 68%,
+        transparent 84%);
+    filter: blur(90px);
+    opacity: 0.65;
+    animation: ambientMistB 62s ease-in-out infinite alternate;
 }
 
-/* Drift + scale + rotate + opacity breathing.
-   Translation kept ≤ 10% so blobs stay roughly in-frame.
-   Rotation kept ≤ 18° so motion reads as "soft wash" not "spinning".
-   Scale kept 0.92..1.18 so size pulse is perceivable but not pumping. */
-@keyframes ambientBlob1 {
-    0%   { transform: translate(-6%, -4%) scale(0.96) rotate(0deg);   opacity: 0.55; }
-    33%  { transform: translate(4%, 6%)   scale(1.12) rotate(8deg);   opacity: 0.85; }
-    66%  { transform: translate(7%, -3%)  scale(1.04) rotate(-6deg);  opacity: 0.70; }
-    100% { transform: translate(-3%, 5%)  scale(1.16) rotate(14deg);  opacity: 0.90; }
+/* Drift in viewport units (vw/vh) so motion sweeps across the empty
+   left/right border areas instead of just bobbing in place.
+   Rotation kept small so motion reads as "drift", not "spin".
+   translate3d engages the GPU compositor layer for smooth playback. */
+@keyframes ambientMistA {
+    0%   { transform: translate3d(-4vw,  2vh, 0) scale(1.00) rotate(0deg); }
+    35%  { transform: translate3d(10vw, -3vh, 0) scale(1.08) rotate(4deg); }
+    70%  { transform: translate3d( 5vw,  6vh, 0) scale(1.15) rotate(-3deg); }
+    100% { transform: translate3d(16vw,  1vh, 0) scale(1.06) rotate(6deg); }
 }
-@keyframes ambientBlob2 {
-    0%   { transform: translate(5%, 5%)   scale(1.10) rotate(0deg);    opacity: 0.65; }
-    40%  { transform: translate(-7%, 3%)  scale(0.95) rotate(-12deg);  opacity: 0.88; }
-    75%  { transform: translate(-2%, -6%) scale(1.15) rotate(6deg);    opacity: 0.72; }
-    100% { transform: translate(6%, -3%)  scale(1.02) rotate(-3deg);   opacity: 0.85; }
+
+@keyframes ambientMistB {
+    0%   { transform: translate3d(  5vw, -2vh, 0) scale(1.08) rotate(0deg); }
+    40%  { transform: translate3d( -8vw,  5vh, 0) scale(0.98) rotate(-5deg); }
+    75%  { transform: translate3d(-14vw, -4vh, 0) scale(1.12) rotate(3deg); }
+    100% { transform: translate3d( -4vw,  6vh, 0) scale(1.04) rotate(-4deg); }
 }
 
 /* ---- Playground floor (top-view Dead Room photo) ----
