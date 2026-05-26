@@ -470,6 +470,24 @@ ngrok http 8080</code></pre>
                     <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalCurrentB">—</span>
                 </div>
             </div>
+            <!-- Live balance — the existing #hudMixBar element MOVED inside
+                 the goal card so it isn't a floating panel anymore. All
+                 segment IDs (#hudMixSegR/G/B + #hudMatchProgressBar) stay
+                 unchanged so the JS that drives them keeps working. The
+                 .hud-mix-bar CSS rule was stripped of its position+glass
+                 styling so it sits inline as part of the card. -->
+            <div id="hudMixBar" class="hud-mix-bar">
+                <span class="hud-mix-bar-label">live balance</span>
+                <div class="hud-mix-bar-track">
+                    <div id="hudMixSegR" class="hud-mix-seg hud-mix-seg-r"></div>
+                    <div id="hudMixSegG" class="hud-mix-seg hud-mix-seg-g"></div>
+                    <div id="hudMixSegB" class="hud-mix-seg hud-mix-seg-b"></div>
+                </div>
+                <div id="hudMatchProgress" class="hud-match-progress">
+                    <div id="hudMatchProgressBar" class="hud-match-progress-bar"></div>
+                </div>
+            </div>
+
             <div class="main-goal-hold">
                 <div class="main-goal-hold-track">
                     <div id="goalHoldBar" class="main-goal-hold-bar"></div>
@@ -513,20 +531,10 @@ ngrok http 8080</code></pre>
             </div>
         </div>
 
-        <!-- HUD mix bar — slim stacked colour bar showing the current R/G/B
-             balance. Always visible (replaces what the central mixing box
-             used to show). Match-progress overlays here during Mix Echo. -->
-        <div id="hudMixBar" class="hud-mix-bar">
-            <span class="hud-mix-bar-label">live balance</span>
-            <div class="hud-mix-bar-track">
-                <div id="hudMixSegR" class="hud-mix-seg hud-mix-seg-r"></div>
-                <div id="hudMixSegG" class="hud-mix-seg hud-mix-seg-g"></div>
-                <div id="hudMixSegB" class="hud-mix-seg hud-mix-seg-b"></div>
-            </div>
-            <div id="hudMatchProgress" class="hud-match-progress">
-                <div id="hudMatchProgressBar" class="hud-match-progress-bar"></div>
-            </div>
-        </div>
+        <!-- (#hudMixBar was MOVED into #mainGoalCard above to unify the
+             top-centre HUD. The element + all its segment IDs still exist,
+             just at a new DOM location. See the .hud-mix-bar CSS rule —
+             position: absolute was stripped so it sits inline.) -->
 
         <!-- Player volume bars + live contribution % (bottom).
              Each row: colour label · raw-volume bar · "X% of mix" share.

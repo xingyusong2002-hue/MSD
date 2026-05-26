@@ -2624,10 +2624,12 @@ body.in-playground #playgroundFloor {
     opacity: 1;
 }
 
-/* Per-round instruction strip (sits inside #gameHud near the top centre). */
+/* Per-round instruction strip (sits inside #gameHud near the top centre).
+   Pushed further down now that #hudMixBar lives INSIDE #mainGoalCard —
+   the card is taller (~200px) than the previous version (~140px). */
 .round-instruction {
     position: absolute;
-    top: 168px;             /* shifted down — main goal card sits at top:14 */
+    top: 218px;             /* below the unified main-goal card (sits at top:14, ~200px tall) */
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -2790,18 +2792,17 @@ body.in-playground #playgroundFloor {
    Slim, top-centre, always visible during play. Three coloured segments
    that scale with each role's share of the live mix. Slim green match
    progress bar underneath fills during Mix Echo. */
+/* Lives INSIDE #mainGoalCard now (moved from a floating top-centre
+   glass panel). All glass-card styling was stripped — the parent
+   .main-goal-card already provides the surface. Only the inline
+   layout (label + track + match-progress) stays. */
 .hud-mix-bar {
-    position: absolute;
-    top: 60px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 4;
-    width: min(420px, 80vw);
-    padding: 8px 14px 10px;
-    border-radius: 12px;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    backdrop-filter: var(--glass-blur);
+    width: 100%;
+    margin-top: 4px;
+    padding: 0;
+    background: none;
+    border: 0;
+    backdrop-filter: none;
     pointer-events: none;
     text-align: center;
 }
