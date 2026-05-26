@@ -1366,19 +1366,25 @@
         arcRadialGap: 24,          // gap between concentric arcs (volume-modulated)
         arcSpanMax: Math.PI * 0.65, // angular spread of innermost (widest) arc
         arcSegments: 22,           // polyline resolution per arc
-        arcWobbleAmp: 1.6,         // sine wobble on arc radius (px)
-        baseAlpha: 0.70,           // was 0.55 — facing arcs read at projection distance
+        arcWobbleAmp: 2.2,         // was 1.6 — slightly more organic shimmer
+        // Brightness lifted to keep up with the recent ring-visibility pass.
+        // Rings now hit 0.78 alpha at loud volume; interference needs to read
+        // at the same visual weight or it disappears beneath the rings.
+        baseAlpha: 0.88,           // was 0.70
         // Interference-fringe stack across the gap (drawCrossingContours).
-        // Five perpendicular bands instead of two — the spacing+falloff
-        // is what makes it read as an interference pattern rather than
-        // "a couple of strokes between dots".
+        // 5-band perpendicular fringe + extra moiré sine in the wobble
+        // formula = a richer interference pattern without adding draw cost.
         contourBands: 5,
         contourBandSpacingPx: 5,   // axial gap between adjacent bands
-        contourAlphaCap: 0.45,     // was 0.32 — bands more legible
-        // Tiny brightening at the midpoint — a single STROKE circle, no
-        // fill, so it never re-introduces the rejected bubble/blob look.
+        contourAlphaCap: 0.62,     // was 0.45 — bands legible against bright rings
+        // Small midpoint brightening — STROKE circle (no fill), reads as
+        // a local "fields locally interact here" cue.
         midpointStrokeR: 6,
-        midpointStrokeAlpha: 0.50,
+        midpointStrokeAlpha: 0.70, // was 0.50
+        // Cutoff used by inner functions to skip near-invisible strokes.
+        // Lowered so soft-but-just-detectable interference still emits a
+        // faint outermost band rather than blinking off entirely.
+        skipAlphaThreshold: 0.020, // was 0.030
         overlapFieldAlpha: 0.16,   // (retained — referenced by debug only)
         overlapLengthFactor: 0.42,
         overlapWidthFactor:  0.20,
@@ -1419,23 +1425,28 @@
             const distFromMid = Math.abs(i - mid);
             const fringeFalloff = 1 - distFromMid / (mid + 0.5); // 1 at centre → small at edges
             const alpha = intensity * INTERFERENCE.contourAlphaCap * fringeFalloff;
-            if (alpha < 0.03) continue;
+            if (alpha < INTERFERENCE.skipAlphaThreshold) continue;
             const axialOffset = (i - mid) * spacing;
             const baseX = midX + axisX * axialOffset;
             const baseY = midY + axisY * axialOffset;
             // Centre band slightly thicker so the fringe stack has visible
             // hierarchy without any band being a heavy line.
-            ctx.lineWidth = 0.7 + fringeFalloff * 0.6;
+            ctx.lineWidth = 0.8 + fringeFalloff * 0.7;
             ctx.strokeStyle = `rgba(${col},${alpha.toFixed(3)})`;
             ctx.beginPath();
-            const segments = 18;
+            const segments = 22;       // slightly higher res for smoother moiré
             for (let s = 0; s <= segments; s++) {
                 const u = (s / segments - 0.5) * 2;     // -1..1 across the contour
                 const taper = 1 - Math.abs(u);          // fade to 0 at tips
-                // Sine wobble + small time evolution + per-band phase.
+                // Three superposed sines — frequencies 2, 5, 3.7. The
+                // non-integer 3.7 produces beats against the 2 and 5
+                // multiples (gcd of the three doesn't repeat at any short
+                // interval), giving the contour a moiré-like shimmer that
+                // shifts subtly as `time` evolves.
                 const wob =
-                    Math.sin(u * Math.PI * 2 + time * 1.4 + i * 1.1) * 2.4
-                    + Math.sin(u * Math.PI * 5 + time * 0.9) * 0.9;
+                    Math.sin(u * Math.PI * 2   + time * 1.4 + i * 1.1) * 2.4
+                    + Math.sin(u * Math.PI * 5   + time * 0.9) * 0.9
+                    + Math.sin(u * Math.PI * 3.7 + time * 1.7 + i * 0.4) * 1.3;
                 const x = baseX + perpX * u * halfLen + axisX * wob * taper;
                 const y = baseY + perpY * u * halfLen + axisY * wob * taper;
                 if (s === 0) ctx.moveTo(x, y);
@@ -1479,7 +1490,7 @@
             const endA   = facingAngle + span / 2;
             // Inner arcs brighter, outer arcs fainter.
             const alpha = INTERFERENCE.baseAlpha * intensity * (1 - i * 0.28);
-            if (alpha < 0.03) continue;
+            if (alpha < INTERFERENCE.skipAlphaThreshold) continue;
             ctx.strokeStyle = `rgba(${col},${alpha.toFixed(3)})`;
             ctx.lineWidth = 1.4 - i * 0.30;
             ctx.beginPath();
@@ -1519,7 +1530,15 @@
         const proxRadius = CONFIG.ringTravel * INTERFERENCE.proximityFactor + CONFIG.ringBaseRadius;
         const proxNorm = 1 - Math.min(1, dist / proxRadius);
         const quieter  = Math.min(volA, volB);
-        const intensity = Math.min(1, quieter * (0.5 + 0.8 * proxNorm));
+        // Intensity formula bumped: quieter normalised against threshold
+        // (not raw volume) so "both above threshold" produces visible
+        // interference even at modest volumes. The visibility-pass
+        // halved volumeThresholdVisual; the old `quieter * (0.5 + 0.8*p)`
+        // formula would have given imperceptible intensity at the new
+        // threshold (intensity ~0.04 at quieter=0.025, prox=0.5).
+        const T = CONFIG.volumeThresholdVisual;
+        const volNorm = Math.min(1, (quieter - T) / (T * 4));  // 0..1 in [T, 5T] range
+        const intensity = Math.min(1, (0.30 + 0.55 * volNorm) * (0.55 + 0.55 * proxNorm));
 
         // STROKES ONLY — no filled shapes anywhere in this pipeline.
         // (The old filled-ellipse overlap field has been removed because
@@ -2626,24 +2645,25 @@
         // would otherwise reach further.
         ctx.drawImage(paintCanvas, 0, 0, window.innerWidth, window.innerHeight);
 
-        // Per-role anchors + emitters.
+        // Per-role anchors + emitters. Source DOTS are deliberately NOT
+        // drawn in this loop — they're drawn AFTER wave interactions so
+        // the dot sits on top of the interference contours (the brief
+        // calls for interference "above ripples but below source dots").
+        // The source CLOUD (the soft local aura) stays here, before the
+        // rings/interference, because it's a faint background halo, not
+        // a foreground identity marker.
         for (const color of ROLES) {
             const src = sourcePositions[color];
             if (!src) continue;
             const realVol = smoothVolumes[color] || 0;
             const simVol  = simulatedVolumes[color] || 0;
             const vol = Math.max(realVol, simVol);
-            const isConnected = connectedPlayers.includes(color) || simVol > 0;
-
-            if (isConnected) drawSourceDot(src.x, src.y, vol, color, true);
 
             if (vol >= CONFIG.volumeThresholdVisual) {
                 drawSourceCloud(src.x, src.y, vol, color);
                 maybeSpawnRing(color, src, vol);
                 spawnSoundParticles(color, vol, src);
             }
-
-            if (isConnected && debugVisible) drawSourceLabel(src.x, src.y, color, true);
         }
 
         // Rings, particles, collision bursts — all inside the clip.
@@ -2655,6 +2675,24 @@
         // TOP of rings so the deformation reads as a modification of the
         // visible ripples, not as something sitting beneath them.
         drawWaveInteractions();
+
+        // Source DOTS — drawn AFTER drawWaveInteractions so they sit ON
+        // TOP of the interference contours (per the brief's layer order:
+        // "above normal ripples but below source dots"). Particles below
+        // still paint over the dots — that's intentional, particles are
+        // small sparks that read as "in front of" the dot when they
+        // briefly overlap.
+        for (const color of ROLES) {
+            const src = sourcePositions[color];
+            if (!src) continue;
+            const realVol = smoothVolumes[color] || 0;
+            const simVol  = simulatedVolumes[color] || 0;
+            const vol = Math.max(realVol, simVol);
+            const isConnected = connectedPlayers.includes(color) || simVol > 0;
+            if (isConnected) drawSourceDot(src.x, src.y, vol, color, true);
+            if (isConnected && debugVisible) drawSourceLabel(src.x, src.y, color, true);
+        }
+
         updateParticles();
         // (Particle-particle collision bursts disabled — those drew filled
         //  radial-gradient circles that read as bubbles between sources.
