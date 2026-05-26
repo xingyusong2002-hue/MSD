@@ -138,61 +138,64 @@
         // trailAlpha lives in MODE_CONFIG now — Live Mix and Fill Mode use
         // different fade rates (the central differentiator between the two).
         // ---- Event-driven particle emitter ----
-        volumeThresholdVisual: 0.04,
-        particlesPerFramePerVolume: 10,
+        // Refinement pass: visual threshold halved (0.04 -> 0.020) so much
+        // quieter mic input (whispers / finger rubs / paper rustle) registers
+        // as visible ripples + particles. Threshold cascades into ring/
+        // particle alpha + spread formulas (all keyed off `volume / threshold`
+        // ratio), so this single change ALONE makes quiet sounds visibly
+        // bigger and brighter — see ring formulas + spawn checks below.
+        volumeThresholdVisual: 0.020,    // was 0.04
+        particlesPerFramePerVolume: 15,  // was 10 — denser particle field
         // Multiplier applied AFTER volume scaling — tweakable for "feels
         // empty vs feels chaotic" without changing the underlying volume
         // curve. >1 = richer scatter; <1 = sparser.
-        particleScatterGain: 2.1,
+        particleScatterGain: 2.8,        // was 2.1 — richer at the same volume
         // Global cap on simultaneously-alive particles. updateParticles
         // trims oldest entries when this is exceeded so frame rate stays
         // bounded even if three loud players + bursts run at once.
-        maxParticlesCap: 360,
+        // Raised proportionally with spawn rate so the new richness isn't
+        // immediately capped away.
+        maxParticlesCap: 540,            // was 360
         // Angular spread at full volume (radians). Smaller = beam-like;
         // larger = spherical scatter. Quiet volume narrows toward
         // particleSpreadMin so soft sounds feel directional / contained.
-        particleSpreadMin: Math.PI * 0.45,   // ±40° at threshold
+        particleSpreadMin: Math.PI * 0.55,   // ±50° at threshold (was ±40°)
         particleSpreadMax: Math.PI * 2.0,    // full circle at full volume
-        particleMaxSpeed: 3.2,
-        particleMinSize: 0.5,
-        particleMaxSize: 2.2,
-        particleBaseLifetime: 120,     // multiplied by MODE_CONFIG.particleLifeMul
-        particleCenterPull: 0.05,      // gated by shouldUseCenterPull(kind)
-        particleDamping: 0.985,
-        particleAlphaMin: 0.18,
-        particleAlphaMax: 0.42,
+        particleMaxSpeed: 4.2,           // was 3.2 — particles travel further
+        particleMinSize: 0.6,            // was 0.5
+        particleMaxSize: 2.8,            // was 2.2 — brightest particles more legible
+        particleBaseLifetime: 160,       // was 120 — bigger reach (speed × lifetime)
+        particleCenterPull: 0.05,        // gated by shouldUseCenterPull(kind)
+        particleDamping: 0.987,          // was 0.985 — slightly less drag so they coast further
+        particleAlphaMin: 0.30,          // was 0.18 — quiet particles visibly present
+        particleAlphaMax: 0.62,          // was 0.42 — loud particles legible from across the room
         // ---- Source aura (small local glow at the player's anchor) ----
-        // Was a big 5-layer wall of colour (90-200 px radius, ~0.18-0.48
-        // alpha). Tuned WAY down so the ripple/wavefront is the primary
-        // visual — the aura is now just a small "this is alive" halo, not
-        // a background wash that fights the ripple for attention.
         cloudBaseRadius: 26,
         cloudMaxRadius: 78,
         cloudLayers: 3,
         cloudMinOpacity: 0.05,
         cloudMaxOpacity: 0.20,
         // ---- Source wavefront rings — the PRIMARY visual ----
-        // Larger reach, slower expansion, thinner stroke, softer alpha than
-        // before: the user asked for rings that "expand further and fade
-        // more smoothly" so they feel like sound rather than warnings.
-        // Rings are NOT culled at the map boundary — they fade naturally
-        // over their own duration so the wavefront stays continuous.
-        ringMinCooldownMs: 70,
-        ringMaxCooldownMs: 240,
+        // Refinement pass: rings now emit more often, travel further, hit
+        // brighter alphas, and start with thicker line widths. Loud sounds
+        // make big bold ripples; quiet sounds make smaller-but-clearly-
+        // visible ripples (the ringRadiusVolMin bump 0.20 -> 0.40 alone
+        // doubles the minimum reach for quiet sounds at any given travel).
+        ringMinCooldownMs: 55,           // was 70 — rings emit slightly more often
+        ringMaxCooldownMs: 200,          // was 240
         ringBaseRadius: 18,
-        ringTravel: 700,               // was 460 — bigger reach
-        ringTravelSec: 2.8,            // was 1.8 — slower, more elegant
-        ringStartAlphaMin: 0.16,       // soft at threshold volume
-        ringStartAlphaMax: 0.55,       // brighter at loud volume (was 0.45)
-        ringLineMin: 0.8,
-        ringLineMax: 2.6,              // a touch thicker at loud volume (was 2.2)
+        ringTravel: 900,                 // was 700 — bigger reach
+        ringTravelSec: 2.8,              // unchanged — same elegant tempo
+        ringStartAlphaMin: 0.28,         // was 0.16 — soft sounds now clearly visible
+        ringStartAlphaMax: 0.78,         // was 0.55 — loud sounds nearly opaque at start
+        ringLineMin: 1.2,                // was 0.8 — baseline thicker
+        ringLineMax: 3.4,                // was 2.6 — loud rings noticeably bold
         // Volume coefficient for ring max radius: maxRadius = base + travel ×
-        // (radiusVolMin + radiusVolGain × volume). Old (0.7 + 0.5×vol) gave
-        // only ~1.7× range between silent and loud rings. New (0.20 + 0.90×vol)
-        // gives ~5.5× — soft sounds make small ripples, loud ones make big
-        // ones. Loudness now genuinely shapes the visual.
-        ringRadiusVolMin: 0.20,
-        ringRadiusVolGain: 0.90,
+        // (radiusVolMin + radiusVolGain × volume). Bumped radiusVolMin so
+        // quiet sounds reach a meaningful distance (not just tiny dots
+        // around the source). Loudness still dominates via radiusVolGain.
+        ringRadiusVolMin: 0.40,          // was 0.20 — quiet ripples now go ~40% of travel
+        ringRadiusVolGain: 0.95,         // was 0.90 — still strong loud-volume scaling
         // ---- Manual-tracking lerp ----
         positionLerpRate: 0.14,        // 0 = no smoothing, 1 = instant
     };
