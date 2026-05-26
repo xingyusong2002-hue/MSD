@@ -1430,18 +1430,13 @@
         attackLerp:     0.20,    // applies when target.energy is rising
         releaseLerp:    0.035,   // applies when target.energy is falling
 
-        // Inner breathing (existing) — core size + halo alpha.
+        // Subtle breathing — core size + halo alpha + halo radius.
+        // One sine rhythm. The previous outer stroke ring (a second
+        // non-aligning rhythm) was removed — it read as a UI outline /
+        // target marker rather than as light. Asymmetric attack/release
+        // smoothing now carries the "alive but not mechanical" feel.
         breathFreq:     0.7,
         breathAmp:      0.08,
-
-        // Outer breathing ring — thin stroke just outside the halo edge,
-        // pulsing at a DIFFERENT frequency so it never aligns with the
-        // inner breath. Adds subtle "ring breathing" life to the light.
-        ringRMul:       1.08,    // ring sits at haloR × this
-        ringWidth:      1.6,     // px stroke width
-        ringBreathFreq: 0.42,    // slower than coreBreath (0.7) — non-aligning
-        ringIdleAlpha:  0.10,    // ring alpha when silent
-        ringActiveAlpha: 0.32,   // ring alpha at peak energy
     };
 
     // PURE function: compute the central observer's target state from three
@@ -1516,11 +1511,11 @@
         centralLight.energy  += (target.energy  - centralLight.energy)  * k;
         centralLight.balance += (target.balance - centralLight.balance) * k;
 
-        // Two breathing rhythms at NON-aligning frequencies so the light
-        // never visually loops at a steady interval — inner core/halo
-        // breath at 0.7 rad/s, outer ring breath at 0.42 rad/s.
+        // Subtle single-rhythm breathing on halo alpha + radius + core
+        // size. The asymmetric attack/release smoothing above already
+        // gives the light a non-periodic feel; one breath sine is enough
+        // on top of that without becoming mechanical.
         const coreBreath = 1 + CENTRAL_LIGHT.breathAmp * Math.sin(time * CENTRAL_LIGHT.breathFreq);
-        const ringBreath = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * CENTRAL_LIGHT.ringBreathFreq + 1.2));
 
         const cx = mixCenter.x, cy = mixCenter.y;
         const r  = centralLight.r | 0;
@@ -1541,22 +1536,6 @@
         ctx.beginPath();
         ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
         ctx.fill();
-
-        // Outer breathing ring — thin stroke just outside the halo edge.
-        // Breathes at its OWN frequency (ringBreathFreq=0.42, vs inner
-        // halo's 0.7) so it never aligns with the inner pulse — subtle
-        // beat pattern reads as "ring breathing" without becoming a
-        // discrete animation.
-        const ringR = haloR * CENTRAL_LIGHT.ringRMul;
-        const ringAlpha = (CENTRAL_LIGHT.ringIdleAlpha +
-                           (CENTRAL_LIGHT.ringActiveAlpha - CENTRAL_LIGHT.ringIdleAlpha) * e) * ringBreath;
-        if (ringAlpha >= 0.02) {
-            ctx.strokeStyle = `rgba(${r},${g},${b},${ringAlpha.toFixed(3)})`;
-            ctx.lineWidth = CENTRAL_LIGHT.ringWidth;
-            ctx.beginPath();
-            ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-            ctx.stroke();
-        }
 
         // Inner core — a smaller solid disc at higher alpha. Visible even
         // when silent (idle state) so the light always reads as "present".
