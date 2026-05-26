@@ -1408,17 +1408,40 @@
     // hunting through draw code. Each knob shapes one perceptual
     // property — see the comments on each.
     const CENTRAL_LIGHT = {
-        coreR:          9,       // px — solid bright core radius (constant)
-        haloRBase:      34,      // px — soft halo outer radius when silent
-        haloRGrowPx:    32,      // px — halo grows this much at peak energy
+        // Geometry — bumped up for more visual presence.
+        coreR:          14,      // was 9 — larger solid bright core
+        haloRBase:      52,      // was 34 — bigger idle halo
+        haloRGrowPx:    44,      // was 32 — bigger swing on loud sound
         loudReference:  1.5,     // sum of R+G+B vol at which energy=1.0
+
+        // Idle state — warm cream + slightly stronger presence than v1.
         idleColour:     { r: 220, g: 200, b: 170 },  // warm cream when silent
-        idleAlpha:      0.32,    // alpha of the halo gradient when silent
-        activeAlpha:    0.85,    // alpha of the halo gradient at peak energy
-        whiteLift:      0.55,    // how strongly balanced mixes pull toward white
-        smoothLerp:     0.12,    // per-frame interpolation toward target (~135ms)
-        breathFreq:     0.7,     // breathing animation frequency (rad/sec)
-        breathAmp:      0.08,    // ±8% modulation on halo alpha + core size
+        idleAlpha:      0.42,    // was 0.32 — idle glow more present
+        activeAlpha:    0.88,    // was 0.85 — peak slightly brighter
+
+        // Mix-toward-white when voices are balanced.
+        whiteLift:      0.55,
+
+        // Asymmetric smoothing (was a single smoothLerp): fast attack so
+        // the light reacts when sound appears, slow release so it eases
+        // back to idle instead of snapping. Time constants ≈ 80ms attack
+        // / 470ms release at 60fps — matches the ADSR envelope of a real
+        // light fixture (incandescent-warm release feel).
+        attackLerp:     0.20,    // applies when target.energy is rising
+        releaseLerp:    0.035,   // applies when target.energy is falling
+
+        // Inner breathing (existing) — core size + halo alpha.
+        breathFreq:     0.7,
+        breathAmp:      0.08,
+
+        // Outer breathing ring — thin stroke just outside the halo edge,
+        // pulsing at a DIFFERENT frequency so it never aligns with the
+        // inner breath. Adds subtle "ring breathing" life to the light.
+        ringRMul:       1.08,    // ring sits at haloR × this
+        ringWidth:      1.6,     // px stroke width
+        ringBreathFreq: 0.42,    // slower than coreBreath (0.7) — non-aligning
+        ringIdleAlpha:  0.10,    // ring alpha when silent
+        ringActiveAlpha: 0.32,   // ring alpha at peak energy
     };
 
     // PURE function: compute the central observer's target state from three
@@ -1479,28 +1502,35 @@
         const vB = effectiveVolumeFor('blue');
         const target = computeCentralMix(vR, vG, vB);
 
-        // Exponential smoothing on each channel + energy + balance. Same
-        // lerp factor across all so colour and brightness move together.
-        const k = CENTRAL_LIGHT.smoothLerp;
+        // Asymmetric smoothing — fast attack, slow release. The rate is
+        // gated by whether the OVERALL energy is rising or falling, so
+        // colour and brightness fade together as one coherent fixture
+        // instead of de-syncing channel by channel.
+        //   Sound starts -> attack rate -> light pops in.
+        //   Sound stops  -> release rate -> light eases back to idle.
+        const energyRising = target.energy >= centralLight.energy;
+        const k = energyRising ? CENTRAL_LIGHT.attackLerp : CENTRAL_LIGHT.releaseLerp;
         centralLight.r       += (target.r       - centralLight.r)       * k;
         centralLight.g       += (target.g       - centralLight.g)       * k;
         centralLight.b       += (target.b       - centralLight.b)       * k;
         centralLight.energy  += (target.energy  - centralLight.energy)  * k;
         centralLight.balance += (target.balance - centralLight.balance) * k;
 
-        // Subtle breathing on halo alpha + core radius so the indicator
-        // feels organic at rest, not frozen.
-        const breath = 1 + CENTRAL_LIGHT.breathAmp * Math.sin(time * CENTRAL_LIGHT.breathFreq);
+        // Two breathing rhythms at NON-aligning frequencies so the light
+        // never visually loops at a steady interval — inner core/halo
+        // breath at 0.7 rad/s, outer ring breath at 0.42 rad/s.
+        const coreBreath = 1 + CENTRAL_LIGHT.breathAmp * Math.sin(time * CENTRAL_LIGHT.breathFreq);
+        const ringBreath = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * CENTRAL_LIGHT.ringBreathFreq + 1.2));
 
         const cx = mixCenter.x, cy = mixCenter.y;
         const r  = centralLight.r | 0;
         const g  = centralLight.g | 0;
         const b  = centralLight.b | 0;
         const e  = centralLight.energy;
-        const haloR = (CENTRAL_LIGHT.haloRBase + CENTRAL_LIGHT.haloRGrowPx * e) * breath;
-        const coreR = CENTRAL_LIGHT.coreR * (0.92 + 0.10 * breath);
+        const haloR = (CENTRAL_LIGHT.haloRBase + CENTRAL_LIGHT.haloRGrowPx * e) * coreBreath;
+        const coreR = CENTRAL_LIGHT.coreR * (0.92 + 0.10 * coreBreath);
         const haloAlpha = (CENTRAL_LIGHT.idleAlpha +
-                          (CENTRAL_LIGHT.activeAlpha - CENTRAL_LIGHT.idleAlpha) * e) * breath;
+                          (CENTRAL_LIGHT.activeAlpha - CENTRAL_LIGHT.idleAlpha) * e) * coreBreath;
 
         // Outer halo — radial gradient from full mix at centre to 0 at edge.
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
@@ -1511,6 +1541,22 @@
         ctx.beginPath();
         ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
         ctx.fill();
+
+        // Outer breathing ring — thin stroke just outside the halo edge.
+        // Breathes at its OWN frequency (ringBreathFreq=0.42, vs inner
+        // halo's 0.7) so it never aligns with the inner pulse — subtle
+        // beat pattern reads as "ring breathing" without becoming a
+        // discrete animation.
+        const ringR = haloR * CENTRAL_LIGHT.ringRMul;
+        const ringAlpha = (CENTRAL_LIGHT.ringIdleAlpha +
+                           (CENTRAL_LIGHT.ringActiveAlpha - CENTRAL_LIGHT.ringIdleAlpha) * e) * ringBreath;
+        if (ringAlpha >= 0.02) {
+            ctx.strokeStyle = `rgba(${r},${g},${b},${ringAlpha.toFixed(3)})`;
+            ctx.lineWidth = CENTRAL_LIGHT.ringWidth;
+            ctx.beginPath();
+            ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+            ctx.stroke();
+        }
 
         // Inner core — a smaller solid disc at higher alpha. Visible even
         // when silent (idle state) so the light always reads as "present".
