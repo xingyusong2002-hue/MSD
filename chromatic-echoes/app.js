@@ -344,6 +344,13 @@
     // not a flickering data display.
     const centralLight = { r: 220, g: 200, b: 170, energy: 0, balance: 1 };
 
+    // Vertical offset to push the playable area below the top-centre
+    // Main Goal Card. If you change this, also update #playgroundFloor in
+    // style.css (top: calc(50% + Npx)) — the CSS-positioned photo and
+    // the canvas-painted room must stay aligned, or the photo and the
+    // canvas clip rectangle will drift apart.
+    const ROOM_Y_OFFSET_PX = 30;
+
     // ---- Canvas ----
     function resizeCanvas() {
         const dpr = window.devicePixelRatio || 1;
@@ -360,7 +367,9 @@
     // produces continuous, lerp-smoothed movement on every projection.
     function computeMixCenter() {
         const w = window.innerWidth, h = window.innerHeight;
-        mixCenter = { x: w / 2, y: h / 2 };
+        // Mirror the y-offset used by getMapBounds() — both must move
+        // together or the central light drifts away from the room centre.
+        mixCenter = { x: w / 2, y: h / 2 + ROOM_Y_OFFSET_PX };
     }
     // Convert a normalised (0..1, 0..1) position into screen coordinates,
     // confined to the Dead Room map's drawn rectangle so dots and ripple
@@ -439,7 +448,7 @@
         const size  = Math.min(w, h) * 0.78;
         const roomW = size * ROOM_ASPECT;
         const roomH = size;
-        const cx = w / 2, cy = h / 2;
+        const cx = w / 2, cy = h / 2 + ROOM_Y_OFFSET_PX;
         return {
             left:   cx - roomW / 2,
             right:  cx + roomW / 2,
@@ -2673,15 +2682,28 @@
     //   { id: 'cool',  name: 'COOL ECHO',  targetWeights: { r: 0.10, g: 0.45, b: 0.45 }, ... }
     //   { id: 'micro', name: 'MICRO ECHO', targetWeights: { r: 1/3,  g: 1/3,  b: 1/3 },
     //                  holdSeconds: 8, tolerance: 0.16, maxEnergy: 0.15, ... }
+    // Goals now use a FORGIVING ZONE per channel instead of an exact point
+    // target. "Balanced" means each colour weight is within 25..42% — a wide
+    // band that visitors can drift inside without losing progress. Outside
+    // the zone, the match score falls off linearly across `zoneFalloff` of
+    // additional percentage-points before reaching zero.
+    //
+    // targetWeights is kept for display (we still show 33% as the visual
+    // centre of the zone in places), but match logic uses targetZone only.
     const MAIN_GOALS = [
         {
             id: 'balanced',
             name: 'BALANCE THE ECHO',
             tagline: 'Tune the room toward an even mix.',
             targetWeights: { r: 1/3, g: 1/3, b: 1/3 },
+            targetZone: {
+                rMin: 0.25, rMax: 0.42,
+                gMin: 0.25, gMax: 0.42,
+                bMin: 0.25, bMax: 0.42,
+            },
+            zoneFalloff: 0.12,     // 12pp outside the zone still gives partial credit
             holdSeconds: 5,
-            tolerance: 0.22,    // ~13pp wiggle room per channel
-            minEnergy: 0.06,    // requires total R+G+B above this to count
+            minEnergy: 0.06,
         },
     ];
 
@@ -2693,20 +2715,35 @@
         achievedAt: 0,        // performance.now() when achieved
     };
 
-    // Pure helper: given a weights object {r, g, b} (each 0..1, summing to ~1)
-    // and a goal, return matchScore in [0, 1]. 1 = perfect match, 0 = beyond
-    // the tolerance distance. Distance metric is Euclidean in weight-space.
+    // Second smoothing layer specifically on the normalised RATIOS. Raw
+    // weights can swing wildly when total volume is small (division by a
+    // small number), so we keep a rolling exponential average separate
+    // from smoothVolumes. Used for both match computation and the "now"
+    // display in the card.
+    const goalSmoothedWeights = { r: 1/3, g: 1/3, b: 1/3 };
+
+    // Pure helper: given weights {r, g, b} and a goal with a targetZone,
+    // return matchScore in [0, 1]. Per-channel zone check with linear
+    // falloff outside the band; final score is the MIN across channels
+    // (all three must be in their band to count as fully matched).
     function computeGoalMatch(weights, goal) {
-        const dr = weights.r - goal.targetWeights.r;
-        const dg = weights.g - goal.targetWeights.g;
-        const db = weights.b - goal.targetWeights.b;
-        const dist = Math.sqrt(dr*dr + dg*dg + db*db);
-        return Math.max(0, 1 - dist / goal.tolerance);
+        const zone = goal.targetZone;
+        const fall = goal.zoneFalloff || 0.10;
+        const channelScore = (w, lo, hi) => {
+            if (w >= lo && w <= hi) return 1.0;
+            const dist = (w < lo) ? (lo - w) : (w - hi);
+            return Math.max(0, 1 - dist / fall);
+        };
+        return Math.min(
+            channelScore(weights.r, zone.rMin, zone.rMax),
+            channelScore(weights.g, zone.gMin, zone.gMax),
+            channelScore(weights.b, zone.bMin, zone.bMax)
+        );
     }
 
     // Per-frame goal update. dt is in seconds.
-    // Asymmetric hold timer: GROWS at +dt when matched, DECAYS at 0.66*dt
-    // when drifted. Brief drifts don't erase progress; sustained drift does.
+    // Asymmetric hold timer: GROWS at +dt when matched, DECAYS at 0.50*dt
+    // when drifted (~2s to drain a full bar — slower decay than v1's 0.66).
     function updateMainGoal(dt) {
         const goal = MAIN_GOALS[goalState.currentIndex];
         if (!goal) return;
@@ -2717,13 +2754,23 @@
         const total = vR + vG + vB;
         const hasEnergy = total >= goal.minEnergy;
 
-        let rawMatch = 0;
+        // Rolling smoothed weights — second layer of smoothing on top of
+        // smoothVolumes. ~250ms time constant (k=0.12 at 60fps) keeps the
+        // ratios stable when energy is small (where raw weights jitter).
         if (hasEnergy) {
-            const weights = { r: vR / total, g: vG / total, b: vB / total };
-            rawMatch = computeGoalMatch(weights, goal);
+            const instR = vR / total, instG = vG / total, instB = vB / total;
+            const k = 0.12;
+            goalSmoothedWeights.r += (instR - goalSmoothedWeights.r) * k;
+            goalSmoothedWeights.g += (instG - goalSmoothedWeights.g) * k;
+            goalSmoothedWeights.b += (instB - goalSmoothedWeights.b) * k;
         }
+        // When silent, the smoothed weights stay where they were — they
+        // don't snap back to (1/3, 1/3, 1/3), which would falsely show
+        // "in zone" during silence. The hasEnergy gate handles match.
 
-        // Smooth the displayed match so it doesn't twitch every frame.
+        const rawMatch = hasEnergy ? computeGoalMatch(goalSmoothedWeights, goal) : 0;
+
+        // Smooth the match score itself for display.
         goalState.matchScore += (rawMatch - goalState.matchScore) * 0.22;
 
         // Hold timer logic — match >= matchThreshold counts as "holding".
@@ -2735,8 +2782,8 @@
                 goalState.achievedAt = performance.now();
             }
         } else if (!goalState.achieved) {
-            // Soft decay — ~1.5s to drain a fully-held bar back to zero.
-            goalState.holdElapsed = Math.max(0, goalState.holdElapsed - dt * 0.66);
+            // Soft decay — ~2s to drain a full bar (slower than v1's 0.66).
+            goalState.holdElapsed = Math.max(0, goalState.holdElapsed - dt * 0.50);
         }
     }
 
@@ -2753,32 +2800,41 @@
         // avoid redundant DOM work each frame.
         if (mainGoalName  && mainGoalName.textContent  !== goal.name)    mainGoalName.textContent    = goal.name;
         if (mainGoalTagline && mainGoalTagline.textContent !== goal.tagline) mainGoalTagline.textContent = goal.tagline;
+        // Target — show as ZONE RANGE (e.g. "25–42%") so visitors understand
+        // it's forgiving, not point-exact. Goal currently uses identical
+        // zones for all three channels; if a future recipe differs,
+        // each chip already reads from its own zone min/max.
+        const fmtZone = (lo, hi) => Math.round(lo*100) + '–' + Math.round(hi*100) + '%';
+        const zone = goal.targetZone;
         if (goalTargetR) {
-            const tr = Math.round(goal.targetWeights.r * 100) + '%';
+            const tr = fmtZone(zone.rMin, zone.rMax);
             if (goalTargetR.textContent !== tr) goalTargetR.textContent = tr;
         }
         if (goalTargetG) {
-            const tg = Math.round(goal.targetWeights.g * 100) + '%';
+            const tg = fmtZone(zone.gMin, zone.gMax);
             if (goalTargetG.textContent !== tg) goalTargetG.textContent = tg;
         }
         if (goalTargetB) {
-            const tb = Math.round(goal.targetWeights.b * 100) + '%';
+            const tb = fmtZone(zone.bMin, zone.bMax);
             if (goalTargetB.textContent !== tb) goalTargetB.textContent = tb;
         }
 
-        // Live (per-frame) fields — current mix percentages.
+        // Live "now" fields — use the SMOOTHED weights so the percentages
+        // don't dance every frame. Display "—" when energy is below the
+        // minEnergy floor (silence/whisper). The smoothed weights still
+        // reflect the most recent active state, so this isn't a snap.
         const vR = effectiveVolumeFor('red');
         const vG = effectiveVolumeFor('green');
         const vB = effectiveVolumeFor('blue');
         const total = vR + vG + vB;
-        if (total < 0.001) {
+        if (total < goal.minEnergy) {
             if (goalCurrentR) goalCurrentR.textContent = '—';
             if (goalCurrentG) goalCurrentG.textContent = '—';
             if (goalCurrentB) goalCurrentB.textContent = '—';
         } else {
-            if (goalCurrentR) goalCurrentR.textContent = Math.round((vR / total) * 100) + '%';
-            if (goalCurrentG) goalCurrentG.textContent = Math.round((vG / total) * 100) + '%';
-            if (goalCurrentB) goalCurrentB.textContent = Math.round((vB / total) * 100) + '%';
+            if (goalCurrentR) goalCurrentR.textContent = Math.round(goalSmoothedWeights.r * 100) + '%';
+            if (goalCurrentG) goalCurrentG.textContent = Math.round(goalSmoothedWeights.g * 100) + '%';
+            if (goalCurrentB) goalCurrentB.textContent = Math.round(goalSmoothedWeights.b * 100) + '%';
         }
 
         // Hold progress bar — width 0..100% mirrors holdElapsed / holdSeconds.

@@ -450,18 +450,34 @@ ngrok http 8080</code></pre>
              (e.g. "balance the echo to 33/33/33 and hold for 5s").
              Driven by goalState in app.js — see MAIN_GOALS for the
              recipe list. Updates per frame inside render(). -->
+        <!-- Compact horizontal top bar. Three columns:
+               Left   — eyebrow + goal name + (moved) round-instruction chip
+               Middle — target zone + now ratio chips
+               Right  — live balance bar + hold bar + status
+             ID and child-ID set kept stable so app.js DOM refs continue
+             to work without changes. -->
         <div id="mainGoalCard" class="main-goal-card">
-            <div class="main-goal-header">
+            <div class="main-goal-col main-goal-col--left">
                 <span class="main-goal-eyebrow">Main goal</span>
                 <span id="mainGoalName" class="main-goal-name">Balance the Echo</span>
+                <!-- Per-round instruction MOVED here as an inline secondary
+                     line so it doesn't float over the room. Same IDs as the
+                     old absolutely-positioned strip; JS handlers unchanged. -->
+                <div id="roundInstruction" class="round-instruction round-instruction--inline">
+                    <span id="roundKindTag" class="round-kind-tag">Mix Echo</span>
+                    <span id="roundInstructionText" class="round-instruction-text">—</span>
+                </div>
+                <!-- Tagline kept but hidden by CSS in the compact layout —
+                     element preserved in case future copy work needs it. -->
+                <p id="mainGoalTagline" class="main-goal-tagline">Tune the room toward an even mix.</p>
             </div>
-            <p id="mainGoalTagline" class="main-goal-tagline">Tune the room toward an even mix.</p>
-            <div class="main-goal-ratios">
-                <div class="main-goal-ratio main-goal-ratio--target" aria-label="Target mix">
-                    <span class="main-goal-ratio-label">target</span>
-                    <span class="main-goal-ratio-chip main-goal-ratio-chip--r" id="goalTargetR">33%</span>
-                    <span class="main-goal-ratio-chip main-goal-ratio-chip--g" id="goalTargetG">33%</span>
-                    <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalTargetB">33%</span>
+
+            <div class="main-goal-col main-goal-col--middle">
+                <div class="main-goal-ratio main-goal-ratio--target" aria-label="Target zone">
+                    <span class="main-goal-ratio-label">zone</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--r" id="goalTargetR">25–42%</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--g" id="goalTargetG">25–42%</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalTargetB">25–42%</span>
                 </div>
                 <div class="main-goal-ratio main-goal-ratio--current" aria-label="Current mix">
                     <span class="main-goal-ratio-label">now</span>
@@ -470,36 +486,27 @@ ngrok http 8080</code></pre>
                     <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalCurrentB">—</span>
                 </div>
             </div>
-            <!-- Live balance — the existing #hudMixBar element MOVED inside
-                 the goal card so it isn't a floating panel anymore. All
-                 segment IDs (#hudMixSegR/G/B + #hudMatchProgressBar) stay
-                 unchanged so the JS that drives them keeps working. The
-                 .hud-mix-bar CSS rule was stripped of its position+glass
-                 styling so it sits inline as part of the card. -->
-            <div id="hudMixBar" class="hud-mix-bar">
-                <span class="hud-mix-bar-label">live balance</span>
-                <div class="hud-mix-bar-track">
-                    <div id="hudMixSegR" class="hud-mix-seg hud-mix-seg-r"></div>
-                    <div id="hudMixSegG" class="hud-mix-seg hud-mix-seg-g"></div>
-                    <div id="hudMixSegB" class="hud-mix-seg hud-mix-seg-b"></div>
+
+            <div class="main-goal-col main-goal-col--right">
+                <!-- Moved #hudMixBar (kept all segment IDs). -->
+                <div id="hudMixBar" class="hud-mix-bar">
+                    <span class="hud-mix-bar-label">live balance</span>
+                    <div class="hud-mix-bar-track">
+                        <div id="hudMixSegR" class="hud-mix-seg hud-mix-seg-r"></div>
+                        <div id="hudMixSegG" class="hud-mix-seg hud-mix-seg-g"></div>
+                        <div id="hudMixSegB" class="hud-mix-seg hud-mix-seg-b"></div>
+                    </div>
+                    <div id="hudMatchProgress" class="hud-match-progress">
+                        <div id="hudMatchProgressBar" class="hud-match-progress-bar"></div>
+                    </div>
                 </div>
-                <div id="hudMatchProgress" class="hud-match-progress">
-                    <div id="hudMatchProgressBar" class="hud-match-progress-bar"></div>
+                <div class="main-goal-hold">
+                    <div class="main-goal-hold-track">
+                        <div id="goalHoldBar" class="main-goal-hold-bar"></div>
+                    </div>
+                    <span id="goalStatus" class="main-goal-status">Tune the room</span>
                 </div>
             </div>
-
-            <div class="main-goal-hold">
-                <div class="main-goal-hold-track">
-                    <div id="goalHoldBar" class="main-goal-hold-bar"></div>
-                </div>
-                <span id="goalStatus" class="main-goal-status">Tune the room</span>
-            </div>
-        </div>
-
-        <!-- Per-round instruction strip -->
-        <div id="roundInstruction" class="round-instruction">
-            <span id="roundKindTag" class="round-kind-tag">Mix Echo</span>
-            <span id="roundInstructionText" class="round-instruction-text">—</span>
         </div>
 
         <!-- Target color (top center) -->

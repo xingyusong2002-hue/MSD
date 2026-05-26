@@ -347,7 +347,11 @@ body {
    This separation is what lets each layer be tuned independently. */
 #playgroundFloor {
     position: fixed;
-    top: 50%;
+    /* Y-offset of 30px MUST stay in sync with ROOM_Y_OFFSET_PX in app.js
+       (getMapBounds + computeMixCenter). The CSS-positioned photo and
+       the canvas-painted room must overlay exactly — drift causes the
+       photo's wedge edges to misalign with the canvas clip rectangle. */
+    top: calc(50% + 30px);
     left: 50%;
     width: calc(min(78vw, 78vh) * 1.0784);
     height: min(78vw, 78vh);
@@ -2473,18 +2477,21 @@ body.in-playground #playgroundFloor {
      • a thin hold-progress bar + status text
    When the goal is achieved, .main-goal-card.achieved class adds a
    subtle warm border + softens the bar — never a flash. */
+/* Compact horizontal bar (v3): row layout with three columns. ~64px
+   tall instead of the previous ~200px column layout. Frees the
+   playground vertically. */
 .main-goal-card {
     position: absolute;
-    top: 14px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 8px;
-    padding: 12px 22px 14px 22px;
-    min-width: 340px;
-    max-width: 460px;
+    gap: 24px;
+    padding: 8px 20px;
+    min-width: 720px;
+    max-width: min(960px, 96vw);
     border-radius: var(--radius);
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
@@ -2496,15 +2503,32 @@ body.in-playground #playgroundFloor {
     display: none;
 }
 
-.main-goal-header {
+.main-goal-col {
     display: flex;
-    align-items: baseline;
-    gap: 10px;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.main-goal-col--left {
+    align-items: flex-start;
+    min-width: 180px;
+}
+
+.main-goal-col--middle {
+    flex: 1;
+    align-items: center;
+    gap: 3px;
+}
+
+.main-goal-col--right {
+    align-items: stretch;
+    min-width: 220px;
+    gap: 4px;
 }
 
 .main-goal-eyebrow {
     font-family: var(--font-main);
-    font-size: 0.66rem;
+    font-size: 0.62rem;
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--color-text-dim);
@@ -2513,42 +2537,54 @@ body.in-playground #playgroundFloor {
 
 .main-goal-name {
     font-family: var(--font-display);
-    font-size: 0.96rem;
-    letter-spacing: 0.18em;
+    font-size: 0.92rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--color-text);
+    line-height: 1.1;
+    margin-top: 1px;
 }
 
-.main-goal-tagline {
-    font-family: var(--font-italic);
-    font-style: italic;
-    font-size: 0.78rem;
-    color: var(--color-text-dim);
-    text-align: center;
-    margin: 0;
-    opacity: 0.8;
-}
+/* Tagline hidden in the compact layout — element preserved in the
+   DOM in case future copy needs a re-introduction. */
+.main-goal-tagline { display: none; }
 
-.main-goal-ratios {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 2px;
+/* Inline round-instruction chip — overrides the absolute-positioned
+   version. Used when #roundInstruction lives inside #mainGoalCard. */
+.main-goal-card .round-instruction.round-instruction--inline {
+    position: static;
+    top: auto;
+    left: auto;
+    transform: none;
+    margin-top: 3px;
+    padding: 0;
+    background: none;
+    border: 0;
+    backdrop-filter: none;
+    gap: 6px;
+}
+.main-goal-card .round-instruction--inline .round-kind-tag {
+    font-size: 0.6rem;
+    padding: 1px 7px;
+}
+.main-goal-card .round-instruction--inline .round-instruction-text {
+    font-size: 0.7rem;
+    opacity: 0.78;
 }
 
 .main-goal-ratio {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .main-goal-ratio-label {
     font-family: var(--font-main);
-    font-size: 0.66rem;
+    font-size: 0.6rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--color-text-dim);
-    width: 42px;
+    width: 36px;
     text-align: right;
     opacity: 0.7;
 }
@@ -2556,10 +2592,10 @@ body.in-playground #playgroundFloor {
 .main-goal-ratio-chip {
     font-family: var(--font-main);
     font-variant-numeric: tabular-nums;
-    font-size: 0.78rem;
-    letter-spacing: 0.04em;
-    padding: 2px 9px;
-    min-width: 44px;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    padding: 1px 8px;
+    min-width: 56px;       /* fits "25–42%" range string */
     text-align: center;
     border-radius: 999px;
     background: oklch(8% 0.005 60 / 0.5);
