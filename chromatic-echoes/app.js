@@ -322,6 +322,15 @@
     let smoothVolumes = { red: 0, green: 0, blue: 0 };
     let sourcePositions = {}, mixCenter = { x: 0, y: 0 };
 
+    // ---- Central light indicator (live sound observer) ----
+    // 2D digital twin of the physical vertical light rod that sits at the
+    // centre of the real Dead Room. Live-mixes R/G/B sound contributions
+    // into one colour at one point. The smoothed state below is what
+    // glides each frame toward the freshly-computed target colour — gives
+    // the impression of a real light fixture warming up to a new tone,
+    // not a flickering data display.
+    const centralLight = { r: 220, g: 200, b: 170, energy: 0, balance: 1 };
+
     // ---- Canvas ----
     function resizeCanvas() {
         const dpr = window.devicePixelRatio || 1;
@@ -1392,6 +1401,124 @@
 
     function effectiveVolumeFor(role) {
         return Math.max(smoothVolumes[role] || 0, simulatedVolumes[role] || 0);
+    }
+
+    // ---- Central light observer (2D digital twin of the physical rod) ----
+    // Tunable knobs so the central indicator can be re-tuned without
+    // hunting through draw code. Each knob shapes one perceptual
+    // property — see the comments on each.
+    const CENTRAL_LIGHT = {
+        coreR:          9,       // px — solid bright core radius (constant)
+        haloRBase:      34,      // px — soft halo outer radius when silent
+        haloRGrowPx:    32,      // px — halo grows this much at peak energy
+        loudReference:  1.5,     // sum of R+G+B vol at which energy=1.0
+        idleColour:     { r: 220, g: 200, b: 170 },  // warm cream when silent
+        idleAlpha:      0.32,    // alpha of the halo gradient when silent
+        activeAlpha:    0.85,    // alpha of the halo gradient at peak energy
+        whiteLift:      0.55,    // how strongly balanced mixes pull toward white
+        smoothLerp:     0.12,    // per-frame interpolation toward target (~135ms)
+        breathFreq:     0.7,     // breathing animation frequency (rad/sec)
+        breathAmp:      0.08,    // ±8% modulation on halo alpha + core size
+    };
+
+    // PURE function: compute the central observer's target state from three
+    // raw volumes. NO canvas, NO side effects. This is the single source of
+    // truth for the central light colour — the same function can drive (a)
+    // the 2D circle in this client, and (b) a future hardware light rod
+    // via OSC / serial bridge. Both stay in sync because both call this.
+    //
+    // Returns { r, g, b: ints 0..255, energy: 0..1, balance: 0..1 }
+    //   energy  — overall sound activity (sum normalised against loudReference)
+    //   balance — how evenly the three voices contribute (1 = perfectly even,
+    //             0 = one voice fully dominates). Used for the white-lift.
+    function computeCentralMix(vR, vG, vB) {
+        const total = vR + vG + vB;
+        // Idle: no perceptible sound → warm cream "waiting" state.
+        if (total < 0.0015) {
+            return {
+                r: CENTRAL_LIGHT.idleColour.r,
+                g: CENTRAL_LIGHT.idleColour.g,
+                b: CENTRAL_LIGHT.idleColour.b,
+                energy: 0,
+                balance: 1,
+            };
+        }
+        // Normalised contributions — sum to 1.0.
+        const wR = vR / total, wG = vG / total, wB = vB / total;
+        // Weighted RGB average of the three player colours.
+        let mR = wR * COLORS.red.r   + wG * COLORS.green.r + wB * COLORS.blue.r;
+        let mG = wR * COLORS.red.g   + wG * COLORS.green.g + wB * COLORS.blue.g;
+        let mB = wR * COLORS.red.b   + wG * COLORS.green.b + wB * COLORS.blue.b;
+        // Balance factor — distance of (wR,wG,wB) from the centroid (1/3 each),
+        // normalised against the worst-case distance (one voice = 1, others = 0,
+        // which is sqrt(2/3) ≈ 0.8165). balance=1 when even, 0 when dominated.
+        const dx = wR - 1/3, dy = wG - 1/3, dz = wB - 1/3;
+        const balance = Math.max(0, 1 - Math.sqrt(dx*dx + dy*dy + dz*dz) / 0.8165);
+        // White-lift: balanced mixes pull each channel toward 255.
+        // Single-colour mixes leave the channel where it is (balance=0).
+        const lift = balance * CENTRAL_LIGHT.whiteLift;
+        mR += (255 - mR) * lift;
+        mG += (255 - mG) * lift;
+        mB += (255 - mB) * lift;
+        return {
+            r: mR | 0,
+            g: mG | 0,
+            b: mB | 0,
+            energy: Math.min(1, total / CENTRAL_LIGHT.loudReference),
+            balance,
+        };
+    }
+
+    // Per-frame: lerp the smoothed state toward the target so the light
+    // glides between colour states. Then draw inner core + outer halo at
+    // the room centre.
+    function drawCentralLight() {
+        // Target from the same effective volumes the ripple system uses.
+        const vR = effectiveVolumeFor('red');
+        const vG = effectiveVolumeFor('green');
+        const vB = effectiveVolumeFor('blue');
+        const target = computeCentralMix(vR, vG, vB);
+
+        // Exponential smoothing on each channel + energy + balance. Same
+        // lerp factor across all so colour and brightness move together.
+        const k = CENTRAL_LIGHT.smoothLerp;
+        centralLight.r       += (target.r       - centralLight.r)       * k;
+        centralLight.g       += (target.g       - centralLight.g)       * k;
+        centralLight.b       += (target.b       - centralLight.b)       * k;
+        centralLight.energy  += (target.energy  - centralLight.energy)  * k;
+        centralLight.balance += (target.balance - centralLight.balance) * k;
+
+        // Subtle breathing on halo alpha + core radius so the indicator
+        // feels organic at rest, not frozen.
+        const breath = 1 + CENTRAL_LIGHT.breathAmp * Math.sin(time * CENTRAL_LIGHT.breathFreq);
+
+        const cx = mixCenter.x, cy = mixCenter.y;
+        const r  = centralLight.r | 0;
+        const g  = centralLight.g | 0;
+        const b  = centralLight.b | 0;
+        const e  = centralLight.energy;
+        const haloR = (CENTRAL_LIGHT.haloRBase + CENTRAL_LIGHT.haloRGrowPx * e) * breath;
+        const coreR = CENTRAL_LIGHT.coreR * (0.92 + 0.10 * breath);
+        const haloAlpha = (CENTRAL_LIGHT.idleAlpha +
+                          (CENTRAL_LIGHT.activeAlpha - CENTRAL_LIGHT.idleAlpha) * e) * breath;
+
+        // Outer halo — radial gradient from full mix at centre to 0 at edge.
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+        grad.addColorStop(0,    `rgba(${r},${g},${b},${(haloAlpha).toFixed(3)})`);
+        grad.addColorStop(0.45, `rgba(${r},${g},${b},${(haloAlpha * 0.45).toFixed(3)})`);
+        grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner core — a smaller solid disc at higher alpha. Visible even
+        // when silent (idle state) so the light always reads as "present".
+        const coreAlpha = Math.min(1, 0.55 + 0.40 * e);
+        ctx.fillStyle = `rgba(${r},${g},${b},${coreAlpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+        ctx.fill();
     }
 
     // Thin contour strokes crossing the gap between two active sources.
@@ -2676,12 +2803,20 @@
         // visible ripples, not as something sitting beneath them.
         drawWaveInteractions();
 
-        // Source DOTS — drawn AFTER drawWaveInteractions so they sit ON
-        // TOP of the interference contours (per the brief's layer order:
-        // "above normal ripples but below source dots"). Particles below
-        // still paint over the dots — that's intentional, particles are
-        // small sparks that read as "in front of" the dot when they
-        // briefly overlap.
+        // Central light observer — 2D digital twin of the physical light
+        // rod that will sit at the room's centre. Lives ABOVE rings and
+        // interference but BELOW the source dots (drawn just below)
+        // because the dots are the visitors' identity markers and must
+        // stay the brightest foreground at any moment. The central
+        // light's brightness is energy-scaled, so during a loud mix
+        // moment it can approach the dots' visual weight — exactly when
+        // the "everyone is contributing" reading should be foregrounded.
+        drawCentralLight();
+
+        // Source DOTS — drawn AFTER drawWaveInteractions + drawCentralLight
+        // so they sit ON TOP of both. Particles below still paint over the
+        // dots — that's intentional, particles are small sparks that read
+        // as "in front of" the dot when they briefly overlap.
         for (const color of ROLES) {
             const src = sourcePositions[color];
             if (!src) continue;
