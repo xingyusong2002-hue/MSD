@@ -47,6 +47,19 @@
     const touchpadArea  = document.getElementById('touchpadArea');
     const touchpadDot   = document.getElementById('touchpadDot');
     const gameHud = document.getElementById('gameHud');
+    // Main Goal Card DOM refs (cooperative listening target — see MAIN_GOALS,
+    // goalState, and updateMainGoal() below).
+    const mainGoalCard   = document.getElementById('mainGoalCard');
+    const mainGoalName   = document.getElementById('mainGoalName');
+    const mainGoalTagline = document.getElementById('mainGoalTagline');
+    const goalTargetR    = document.getElementById('goalTargetR');
+    const goalTargetG    = document.getElementById('goalTargetG');
+    const goalTargetB    = document.getElementById('goalTargetB');
+    const goalCurrentR   = document.getElementById('goalCurrentR');
+    const goalCurrentG   = document.getElementById('goalCurrentG');
+    const goalCurrentB   = document.getElementById('goalCurrentB');
+    const goalHoldBar    = document.getElementById('goalHoldBar');
+    const goalStatus     = document.getElementById('goalStatus');
     const stageToolbar = document.getElementById('stageToolbar');
     const stageToolbarBtns = document.querySelectorAll('.stage-toolbar-btn');
     const hostWaitingControls = document.getElementById('hostWaitingControls');
@@ -2645,14 +2658,179 @@
         }
     }
 
+    // ============================================================
+    // ---- Main Goal (cooperative listening target) ----
+    // ============================================================
+    // Recipe-as-data: each goal declares targetWeights (R/G/B
+    // contributions summing to 1.0), holdSeconds (how long the mix
+    // must stay matched), tolerance (how close in weight-space counts
+    // as a match), and minEnergy (total volume floor so total silence
+    // doesn't trivially "match" by all-zero weights).
+    //
+    // To add a new goal: append an entry here. The UI auto-adapts.
+    // Examples for future expansion (kept commented for reference):
+    //   { id: 'warm',  name: 'WARM ROOM',  targetWeights: { r: 0.55, g: 0.25, b: 0.20 }, ... }
+    //   { id: 'cool',  name: 'COOL ECHO',  targetWeights: { r: 0.10, g: 0.45, b: 0.45 }, ... }
+    //   { id: 'micro', name: 'MICRO ECHO', targetWeights: { r: 1/3,  g: 1/3,  b: 1/3 },
+    //                  holdSeconds: 8, tolerance: 0.16, maxEnergy: 0.15, ... }
+    const MAIN_GOALS = [
+        {
+            id: 'balanced',
+            name: 'BALANCE THE ECHO',
+            tagline: 'Tune the room toward an even mix.',
+            targetWeights: { r: 1/3, g: 1/3, b: 1/3 },
+            holdSeconds: 5,
+            tolerance: 0.22,    // ~13pp wiggle room per channel
+            minEnergy: 0.06,    // requires total R+G+B above this to count
+        },
+    ];
+
+    const goalState = {
+        currentIndex: 0,
+        matchScore: 0,        // smoothed 0..1 — how close current mix is to target
+        holdElapsed: 0,       // seconds held above match threshold
+        achieved: false,
+        achievedAt: 0,        // performance.now() when achieved
+    };
+
+    // Pure helper: given a weights object {r, g, b} (each 0..1, summing to ~1)
+    // and a goal, return matchScore in [0, 1]. 1 = perfect match, 0 = beyond
+    // the tolerance distance. Distance metric is Euclidean in weight-space.
+    function computeGoalMatch(weights, goal) {
+        const dr = weights.r - goal.targetWeights.r;
+        const dg = weights.g - goal.targetWeights.g;
+        const db = weights.b - goal.targetWeights.b;
+        const dist = Math.sqrt(dr*dr + dg*dg + db*db);
+        return Math.max(0, 1 - dist / goal.tolerance);
+    }
+
+    // Per-frame goal update. dt is in seconds.
+    // Asymmetric hold timer: GROWS at +dt when matched, DECAYS at 0.66*dt
+    // when drifted. Brief drifts don't erase progress; sustained drift does.
+    function updateMainGoal(dt) {
+        const goal = MAIN_GOALS[goalState.currentIndex];
+        if (!goal) return;
+
+        const vR = effectiveVolumeFor('red');
+        const vG = effectiveVolumeFor('green');
+        const vB = effectiveVolumeFor('blue');
+        const total = vR + vG + vB;
+        const hasEnergy = total >= goal.minEnergy;
+
+        let rawMatch = 0;
+        if (hasEnergy) {
+            const weights = { r: vR / total, g: vG / total, b: vB / total };
+            rawMatch = computeGoalMatch(weights, goal);
+        }
+
+        // Smooth the displayed match so it doesn't twitch every frame.
+        goalState.matchScore += (rawMatch - goalState.matchScore) * 0.22;
+
+        // Hold timer logic — match >= matchThreshold counts as "holding".
+        const matchThreshold = 0.55;
+        if (goalState.matchScore >= matchThreshold && hasEnergy) {
+            goalState.holdElapsed = Math.min(goal.holdSeconds, goalState.holdElapsed + dt);
+            if (goalState.holdElapsed >= goal.holdSeconds && !goalState.achieved) {
+                goalState.achieved = true;
+                goalState.achievedAt = performance.now();
+            }
+        } else if (!goalState.achieved) {
+            // Soft decay — ~1.5s to drain a fully-held bar back to zero.
+            goalState.holdElapsed = Math.max(0, goalState.holdElapsed - dt * 0.66);
+        }
+    }
+
+    // DOM update for the goal card. Called every frame from render().
+    // Reads goalState + current effective volumes; updates ratio chips,
+    // hold bar width, and status text.
+    function renderMainGoalCard() {
+        if (!mainGoalCard) return;
+        const goal = MAIN_GOALS[goalState.currentIndex];
+        if (!goal) { mainGoalCard.classList.add('hidden'); return; }
+        mainGoalCard.classList.remove('hidden');
+
+        // Static (per-goal) fields — only write if they've changed to
+        // avoid redundant DOM work each frame.
+        if (mainGoalName  && mainGoalName.textContent  !== goal.name)    mainGoalName.textContent    = goal.name;
+        if (mainGoalTagline && mainGoalTagline.textContent !== goal.tagline) mainGoalTagline.textContent = goal.tagline;
+        if (goalTargetR) {
+            const tr = Math.round(goal.targetWeights.r * 100) + '%';
+            if (goalTargetR.textContent !== tr) goalTargetR.textContent = tr;
+        }
+        if (goalTargetG) {
+            const tg = Math.round(goal.targetWeights.g * 100) + '%';
+            if (goalTargetG.textContent !== tg) goalTargetG.textContent = tg;
+        }
+        if (goalTargetB) {
+            const tb = Math.round(goal.targetWeights.b * 100) + '%';
+            if (goalTargetB.textContent !== tb) goalTargetB.textContent = tb;
+        }
+
+        // Live (per-frame) fields — current mix percentages.
+        const vR = effectiveVolumeFor('red');
+        const vG = effectiveVolumeFor('green');
+        const vB = effectiveVolumeFor('blue');
+        const total = vR + vG + vB;
+        if (total < 0.001) {
+            if (goalCurrentR) goalCurrentR.textContent = '—';
+            if (goalCurrentG) goalCurrentG.textContent = '—';
+            if (goalCurrentB) goalCurrentB.textContent = '—';
+        } else {
+            if (goalCurrentR) goalCurrentR.textContent = Math.round((vR / total) * 100) + '%';
+            if (goalCurrentG) goalCurrentG.textContent = Math.round((vG / total) * 100) + '%';
+            if (goalCurrentB) goalCurrentB.textContent = Math.round((vB / total) * 100) + '%';
+        }
+
+        // Hold progress bar — width 0..100% mirrors holdElapsed / holdSeconds.
+        if (goalHoldBar) {
+            const pct = (goalState.holdElapsed / goal.holdSeconds) * 100;
+            goalHoldBar.style.width = pct.toFixed(0) + '%';
+        }
+
+        // Status text — three states: achieved / holding / tuning.
+        // Language is cooperative ("tune", "hold", "matched"), not arcade.
+        if (goalStatus) {
+            let txt;
+            if (goalState.achieved) {
+                txt = 'Echo matched · the room is in balance';
+            } else if (goalState.matchScore >= 0.55) {
+                const remaining = Math.max(0, goal.holdSeconds - goalState.holdElapsed);
+                txt = `Hold the echo · ${remaining.toFixed(1)}s`;
+            } else {
+                txt = 'Tune the room';
+            }
+            if (goalStatus.textContent !== txt) goalStatus.textContent = txt;
+        }
+
+        mainGoalCard.classList.toggle('achieved', goalState.achieved);
+    }
+
     // ---- Render Loop ----
-    function startRenderLoop() { if (!animationId) render(); }
+    function startRenderLoop() {
+        if (!animationId) {
+            // Reset Main Goal state on each fresh playing-phase start so a
+            // previously-achieved goal doesn't bleed into the next round.
+            goalState.matchScore = 0;
+            goalState.holdElapsed = 0;
+            goalState.achieved = false;
+            goalState.achievedAt = 0;
+            render();
+        }
+    }
     function stopRenderLoop() { if (animationId) { cancelAnimationFrame(animationId); animationId = null; } }
 
     function render() {
         animationId = requestAnimationFrame(render);
         const w = window.innerWidth, h = window.innerHeight;
         time += 0.016;
+
+        // Main Goal tick — cooperative listening target. Runs even before
+        // the canvas draw so the goal card updates in lockstep with the
+        // sound visualisation. dt fixed at 0.016s (~60fps); good enough
+        // for the hold-timer resolution (we only display 1 decimal).
+        updateMainGoal(0.016);
+        renderMainGoalCard();
+
         // =========================================================================
         // LAYER-INTENT CONTRACT — read before editing any of the visual integration
         // =========================================================================

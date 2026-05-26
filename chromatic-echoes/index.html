@@ -442,6 +442,42 @@ ngrok http 8080</code></pre>
             <span id="hudTransmitStat" class="hud-transmit-stat">—</span>
         </div>
 
+        <!-- ===== Main Goal Card (cooperative listening target) =====
+             Sits ABOVE the existing per-round instruction so the
+             cooperative goal is the prominent element. The round-
+             instruction strip below still shows the round KIND (Solo /
+             Move / Mix / Silent); the goal card adds the shared aim
+             (e.g. "balance the echo to 33/33/33 and hold for 5s").
+             Driven by goalState in app.js — see MAIN_GOALS for the
+             recipe list. Updates per frame inside render(). -->
+        <div id="mainGoalCard" class="main-goal-card">
+            <div class="main-goal-header">
+                <span class="main-goal-eyebrow">Main goal</span>
+                <span id="mainGoalName" class="main-goal-name">Balance the Echo</span>
+            </div>
+            <p id="mainGoalTagline" class="main-goal-tagline">Tune the room toward an even mix.</p>
+            <div class="main-goal-ratios">
+                <div class="main-goal-ratio main-goal-ratio--target" aria-label="Target mix">
+                    <span class="main-goal-ratio-label">target</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--r" id="goalTargetR">33%</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--g" id="goalTargetG">33%</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalTargetB">33%</span>
+                </div>
+                <div class="main-goal-ratio main-goal-ratio--current" aria-label="Current mix">
+                    <span class="main-goal-ratio-label">now</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--r" id="goalCurrentR">—</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--g" id="goalCurrentG">—</span>
+                    <span class="main-goal-ratio-chip main-goal-ratio-chip--b" id="goalCurrentB">—</span>
+                </div>
+            </div>
+            <div class="main-goal-hold">
+                <div class="main-goal-hold-track">
+                    <div id="goalHoldBar" class="main-goal-hold-bar"></div>
+                </div>
+                <span id="goalStatus" class="main-goal-status">Tune the room</span>
+            </div>
+        </div>
+
         <!-- Per-round instruction strip -->
         <div id="roundInstruction" class="round-instruction">
             <span id="roundKindTag" class="round-kind-tag">Mix Echo</span>

@@ -2462,10 +2462,172 @@ body.in-playground #playgroundFloor {
    Round Library (Step 2)
    ============================================ */
 
+/* ---- Main Goal Card (cooperative listening target) ----
+   Sits at the top centre of the playground HUD, above the per-round
+   instruction strip. Museum-quiet: glass background, soft border,
+   minimal type. NO win/lose language, NO arcade flash. The card
+   contains:
+     • eyebrow "Main goal" + goal name
+     • short tagline ("Tune the room toward an even mix")
+     • two rows of R/G/B percentage chips: target / now
+     • a thin hold-progress bar + status text
+   When the goal is achieved, .main-goal-card.achieved class adds a
+   subtle warm border + softens the bar — never a flash. */
+.main-goal-card {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 22px 14px 22px;
+    min-width: 340px;
+    max-width: 460px;
+    border-radius: var(--radius);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    transition: border-color 0.6s ease, box-shadow 0.6s ease;
+}
+
+.main-goal-card.hidden {
+    display: none;
+}
+
+.main-goal-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.main-goal-eyebrow {
+    font-family: var(--font-main);
+    font-size: 0.66rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+    opacity: 0.7;
+}
+
+.main-goal-name {
+    font-family: var(--font-display);
+    font-size: 0.96rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text);
+}
+
+.main-goal-tagline {
+    font-family: var(--font-italic);
+    font-style: italic;
+    font-size: 0.78rem;
+    color: var(--color-text-dim);
+    text-align: center;
+    margin: 0;
+    opacity: 0.8;
+}
+
+.main-goal-ratios {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.main-goal-ratio {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.main-goal-ratio-label {
+    font-family: var(--font-main);
+    font-size: 0.66rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-text-dim);
+    width: 42px;
+    text-align: right;
+    opacity: 0.7;
+}
+
+.main-goal-ratio-chip {
+    font-family: var(--font-main);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    padding: 2px 9px;
+    min-width: 44px;
+    text-align: center;
+    border-radius: 999px;
+    background: oklch(8% 0.005 60 / 0.5);
+    border: 1px solid var(--glass-border);
+}
+
+.main-goal-ratio-chip--r { color: var(--color-red);   border-color: var(--color-red-dim); }
+.main-goal-ratio-chip--g { color: var(--color-green); border-color: var(--color-green-dim); }
+.main-goal-ratio-chip--b { color: var(--color-blue);  border-color: var(--color-blue-dim); }
+
+/* Target row chips are slightly more saturated to read as the "north
+   star" the player is aiming for; current row chips are calmer. */
+.main-goal-ratio--target .main-goal-ratio-chip {
+    background: oklch(8% 0.010 60 / 0.7);
+}
+
+/* Hold bar — thin progress track. When matched, fills warmly. */
+.main-goal-hold {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    margin-top: 2px;
+}
+
+.main-goal-hold-track {
+    width: 100%;
+    height: 3px;
+    border-radius: 999px;
+    background: oklch(15% 0.010 60 / 0.6);
+    overflow: hidden;
+}
+
+.main-goal-hold-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        oklch(70% 0.10 60) 0%,
+        oklch(82% 0.14 80) 100%);
+    box-shadow: 0 0 8px oklch(70% 0.12 65 / 0.55);
+    transition: width 0.18s ease;
+}
+
+.main-goal-status {
+    font-family: var(--font-main);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim);
+    opacity: 0.85;
+}
+
+/* Achieved state — subtle warm border + glow. NEVER a flash. */
+.main-goal-card.achieved {
+    border-color: oklch(75% 0.14 70 / 0.55);
+    box-shadow: 0 0 30px oklch(72% 0.12 65 / 0.20);
+}
+
+.main-goal-card.achieved .main-goal-status {
+    color: oklch(85% 0.10 75);
+    opacity: 1;
+}
+
 /* Per-round instruction strip (sits inside #gameHud near the top centre). */
 .round-instruction {
     position: absolute;
-    top: 14px;
+    top: 168px;             /* shifted down — main goal card sits at top:14 */
     left: 50%;
     transform: translateX(-50%);
     display: flex;
