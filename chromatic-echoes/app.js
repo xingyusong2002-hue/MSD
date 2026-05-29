@@ -198,8 +198,8 @@
         // which stacked 12-40 concurrent ripples per loud player and read
         // as "too busy". Cooldowns raised well past the earlier calm
         // version (70/240) so density drops and wavefront spacing widens.
-        ringMinCooldownMs: 150,          // was 55 — far fewer rings, calmer cadence
-        ringMaxCooldownMs: 360,          // was 200 — quiet sounds emit sparsely
+        ringMinCooldownMs: 200,          // was 150 — even fewer bands, wider spacing
+        ringMaxCooldownMs: 460,          // was 360 — quiet sounds emit very sparsely
         ringBaseRadius: 18,
         ringTravel: 900,                 // unchanged — KEEP the wider reach/spread
         // Slower expansion: time for a ring to travel its full radius.
@@ -209,9 +209,9 @@
         ringTravelSec: 3.6,              // was 2.8 — gentler propagation
         // Hard ceiling on concurrent rings per role. With slow propagation
         // each ring lives ~3s; without a cap, sustained sound would keep
-        // ~10 alive at once. 5 keeps the room legible — you can follow each
-        // individual wavefront expand and fade.
-        ringMaxAlivePerRole: 5,
+        // ~10 alive at once. 3 keeps the room legible — you can follow each
+        // individual soft band expand and fade.
+        ringMaxAlivePerRole: 3,
         ringStartAlphaMin: 0.28,         // was 0.16 — soft sounds now clearly visible
         ringStartAlphaMax: 0.78,         // was 0.55 — loud sounds nearly opaque at start
         ringLineMin: 1.2,                // was 0.8 — baseline thicker
@@ -1106,88 +1106,91 @@
         activeRings = activeRings.filter(r => (now - r.born) < r.duration);
     }
 
-    // Pseudo-3D wavefronts. Replaces the previous flat ctx.arc() rings.
-    // Each ring is now drawn as THREE concentric layered polygons (inner
-    // bright / mid / outer faint) with:
-    //   • Organic sine-combo deformation (radius wobbles around the
-    //     circle, unique seed per ring).
-    //   • Y-axis foreshortening (perspective compression, y *= 0.82).
-    //   • Doppler asymmetric deformation in the source's motion
-    //     direction (compress in front, stretch behind) — the moving
-    //     velocity is read from roleVelocityScreen.
-    // All three effects use the same polygon-of-segments scaffolding, so
-    // adding them is just extra terms on the per-segment radius. Cost:
-    // for SEGMENTS=64 and 3 layers, ~ 200 lineTo calls per ring per
-    // frame. With the ring-cooldown cap, total work stays bounded.
-    const SEGMENTS = 64;
+    // Soft annular gradient bands. Previously each ring was THREE thin
+    // stroked polygons (inner/mid/outer) with sine wobble — which read as
+    // a stack of contour lines. Each ring is now ONE filled radial-
+    // gradient annulus: transparent at the core, rising to a peak at the
+    // wavefront radius, then falling back to transparent at the outer
+    // edge. The result is a soft expanding SHELL / surface rather than an
+    // outline.
+    //
+    //   • Perspective squash: the gradient is filled inside a
+    //     ctx.scale(1, PERSPECTIVE_Y) transform, so the circle AND its
+    //     radial gradient become the same top-down horizontal ellipse —
+    //     no per-segment polygon maths needed.
+    //   • Band thickness grows with both the ring's current radius and its
+    //     spawn loudness (RING_BAND), so loud/large wavefronts are thick
+    //     soft swells, never thin lines.
+    //   • The sine wobble + per-frame Doppler deformation were removed —
+    //     they were the main source of the "busy thin contour" texture.
+    //     The spawn-time forward offset (r.x/r.y) still gives moving
+    //     sources a gentle leading bias.
+    // Cost: one radial-gradient fill per ring per frame; with the per-role
+    // cap (3) total work is trivially bounded.
     const PERSPECTIVE_Y = 0.82;   // <1 = horizontal-ellipse, top-down room feel
+    const RING_BAND = {
+        thicknessFrac:  0.5,    // band width as a fraction of the current radius
+        minThicknessPx: 18,     // never thinner than this — kills the "outline" read
+        maxThicknessPx: 90,     // cap so a huge ring's band doesn't fill the room
+        loudBase:       0.75,   // thickness multiplier near the visibility threshold
+        loudGain:       0.6,    // extra thickness toward full volume (×(base+gain·int))
+        peakAlphaMul:   1.5,    // gradient peak vs the old stroke alpha (band spreads
+                                 // energy over its width, so it needs a boost to stay
+                                 // as visible as a crisp line)
+        peakAlphaCap:   0.70,   // hard ceiling so the band never blows out to a disc
+    };
     function drawRings() {
         const now = performance.now();
-        // Per-frame time for sine wobble — keeps phase continuous across
-        // frames so the ring breathes smoothly rather than ticking.
-        const tg = time * 2.0;
-
         for (const r of activeRings) {
             const t = (now - r.born) / r.duration;
             if (t < 0 || t > 1) continue;
 
             const radius = CONFIG.ringBaseRadius + (r.maxRadius - CONFIG.ringBaseRadius) * t;
+            // Same fade envelope as before — quadratic ease-out over life.
             const baseAlpha = r.startAlpha * (1 - t) * (1 - t);
-            if (baseAlpha < 0.02) continue;
-            const lineW = CONFIG.ringLineMin + (CONFIG.ringLineMax - CONFIG.ringLineMin) * (1 - t);
+            if (baseAlpha < 0.015) continue;
 
-            // Wobble amplitudes scale with the ring's spawn intensity (volume).
-            // Two frequencies summed = organic curve, no obvious sinusoid.
-            const wobbleA = 4 + r.intensity * 9;     // low-frequency, larger
-            const wobbleB = 1.5 + r.intensity * 4.5; // higher-frequency, smaller
-            const phase = tg + r.wobbleSeed;
+            // Band thickness: fraction of radius, clamped, then widened by
+            // spawn loudness. Thin bands at small radius/quiet; thick soft
+            // swells at large radius/loud.
+            const bandW = Math.max(
+                RING_BAND.minThicknessPx,
+                Math.min(RING_BAND.maxThicknessPx, radius * RING_BAND.thicknessFrac)
+            ) * (RING_BAND.loudBase + RING_BAND.loudGain * r.intensity);
 
-            // Doppler bias from current source velocity (not the velocity
-            // at spawn time — keeps the visual responsive if the source
-            // stops mid-ring-life).
-            const v = roleVelocityScreen[r.role] || { x: 0, y: 0 };
-            const speedPx = Math.sqrt(v.x * v.x + v.y * v.y);
-            const moving = speedPx > 0.6;
-            const motionAngle = moving ? Math.atan2(v.y, v.x) : 0;
-            const dopplerK = moving ? Math.min(speedPx * 1.8, 18) : 0;
+            const inner = Math.max(0, radius - bandW / 2);
+            const outer = radius + bandW / 2;
+            if (outer < 1) continue;
 
-            // Three layered polygons → fake depth. Each layer's scale,
-            // alpha, and lineWidth differ so the eye reads them as
-            // overlapping volumetric wavefronts instead of a single line.
-            // Inner = brightest + thinnest; outer = faintest + thinnest.
-            // Mid carries the bulk of the ring's visual weight.
-            const layers = [
-                { scale: 0.82, alphaMul: 1.00, lineMul: 0.90 },  // inner
-                { scale: 1.00, alphaMul: 0.68, lineMul: 1.00 },  // mid
-                { scale: 1.22, alphaMul: 0.38, lineMul: 0.55 },  // outer
-            ];
-            for (const lay of layers) {
-                const lAlpha = baseAlpha * lay.alphaMul;
-                if (lAlpha < 0.02) continue;
-                ctx.strokeStyle = `rgba(${r.color.r},${r.color.g},${r.color.b},${lAlpha.toFixed(3)})`;
-                ctx.lineWidth = Math.max(0.4, lineW * lay.lineMul);
-                ctx.beginPath();
-                for (let i = 0; i <= SEGMENTS; i++) {
-                    const a = (i / SEGMENTS) * Math.PI * 2;
-                    // Organic wobble — two sines at different multiples.
-                    const wob = Math.sin(a * 3 + phase) * wobbleA
-                              + Math.sin(a * 7 + phase * 0.7) * wobbleB;
-                    // Doppler asymmetric bias — cos(a - motionAngle) is +1
-                    // exactly in motion direction, -1 directly behind. We
-                    // SUBTRACT from radius in motion direction (compress)
-                    // and ADD behind (stretch) — wave gets pushed forward
-                    // visually.
-                    const dopp = moving ? -Math.cos(a - motionAngle) * dopplerK : 0;
-                    let rad = (radius + wob + dopp) * lay.scale;
-                    if (rad < 1) rad = 1;
-                    const x = r.x + Math.cos(a) * rad;
-                    const y = r.y + Math.sin(a) * rad * PERSPECTIVE_Y;
-                    if (i === 0) ctx.moveTo(x, y);
-                    else         ctx.lineTo(x, y);
-                }
-                ctx.closePath();
-                ctx.stroke();
-            }
+            const peak = Math.min(RING_BAND.peakAlphaCap, baseAlpha * RING_BAND.peakAlphaMul);
+            const col = `${r.color.r},${r.color.g},${r.color.b}`;
+
+            ctx.save();
+            // Perspective squash — circle + gradient become one ellipse.
+            ctx.translate(r.x, r.y);
+            ctx.scale(1, PERSPECTIVE_Y);
+
+            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, outer);
+            const fInner = inner / outer;        // band start (0..1 of outer)
+            const fMid   = radius / outer;        // band peak
+            const fRise  = fInner + (fMid - fInner) * 0.55;
+            const fFall  = fMid + (1 - fMid) * 0.5;
+            // transparent core → soft rise → peak at the wavefront → soft
+            // fall → transparent edge. The rise/fall mid-stops round the
+            // band's cross-section so it reads as a gradient swell, not a
+            // hard triangular spike.
+            grad.addColorStop(0, `rgba(${col},0)`);
+            if (fInner > 0.01) grad.addColorStop(fInner, `rgba(${col},0)`);
+            grad.addColorStop(Math.min(0.999, fRise), `rgba(${col},${(peak * 0.55).toFixed(3)})`);
+            grad.addColorStop(Math.min(0.999, fMid),  `rgba(${col},${peak.toFixed(3)})`);
+            grad.addColorStop(Math.min(0.999, fFall), `rgba(${col},${(peak * 0.45).toFixed(3)})`);
+            grad.addColorStop(1, `rgba(${col},0)`);
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, outer, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
         }
     }
 
