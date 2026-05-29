@@ -194,11 +194,24 @@
         // make big bold ripples; quiet sounds make smaller-but-clearly-
         // visible ripples (the ringRadiusVolMin bump 0.20 -> 0.40 alone
         // doubles the minimum reach for quiet sounds at any given travel).
-        ringMinCooldownMs: 55,           // was 70 — rings emit slightly more often
-        ringMaxCooldownMs: 200,          // was 240
+        // Calm-rhythm pass: rings were emitting far too often (min 55ms),
+        // which stacked 12-40 concurrent ripples per loud player and read
+        // as "too busy". Cooldowns raised well past the earlier calm
+        // version (70/240) so density drops and wavefront spacing widens.
+        ringMinCooldownMs: 150,          // was 55 — far fewer rings, calmer cadence
+        ringMaxCooldownMs: 360,          // was 200 — quiet sounds emit sparsely
         ringBaseRadius: 18,
-        ringTravel: 900,                 // was 700 — bigger reach
-        ringTravelSec: 2.8,              // unchanged — same elegant tempo
+        ringTravel: 900,                 // unchanged — KEEP the wider reach/spread
+        // Slower expansion: time for a ring to travel its full radius.
+        // Bumped 2.8 -> 3.6 so the wavefront eases outward instead of
+        // racing. Longer life would normally raise the on-screen count, so
+        // ringMaxAlivePerRole below caps it independently.
+        ringTravelSec: 3.6,              // was 2.8 — gentler propagation
+        // Hard ceiling on concurrent rings per role. With slow propagation
+        // each ring lives ~3s; without a cap, sustained sound would keep
+        // ~10 alive at once. 5 keeps the room legible — you can follow each
+        // individual wavefront expand and fade.
+        ringMaxAlivePerRole: 5,
         ringStartAlphaMin: 0.28,         // was 0.16 — soft sounds now clearly visible
         ringStartAlphaMax: 0.78,         // was 0.55 — loud sounds nearly opaque at start
         ringLineMin: 1.2,                // was 0.8 — baseline thicker
@@ -1025,6 +1038,16 @@
 
     function maybeSpawnRing(role, src, volume) {
         if (volume < CONFIG.volumeThresholdVisual) return;
+        // Hard ceiling on concurrent rings for this role. Because the
+        // calm-rhythm pass lengthened ring lifetime, an explicit cap (not
+        // just the cooldown) is what reliably keeps the room from filling
+        // up under sustained sound. When at capacity we simply skip — the
+        // oldest ring will expire and free a slot, giving a steady,
+        // followable cadence rather than a dense stack.
+        let aliveForRole = 0;
+        for (const rr of activeRings) { if (rr.role === role) aliveForRole++; }
+        if (aliveForRole >= CONFIG.ringMaxAlivePerRole) return;
+
         // Doppler bias: when the source is moving, shorten the cooldown
         // (more rings in flight at once) and offset the spawn position
         // slightly forward in the motion direction. The combined effect
@@ -1036,10 +1059,11 @@
         const motionGain = moving ? Math.min(1, speedPx / 8) : 0;
 
         // Loud volume = shorter cooldown = more frequent rings; motion
-        // shortens it further.
+        // shortens it further. Motion shortening softened (0.45 -> 0.22)
+        // so moving players no longer flood the room with extra rings.
         const tt = (1 - Math.min(1, volume));
         const baseCd = CONFIG.ringMinCooldownMs + tt * (CONFIG.ringMaxCooldownMs - CONFIG.ringMinCooldownMs);
-        const cooldown = baseCd * (1 - motionGain * 0.45);
+        const cooldown = baseCd * (1 - motionGain * 0.22);
         const now = performance.now();
         if (now - lastRingAt[role] < cooldown) return;
         lastRingAt[role] = now;
