@@ -2167,6 +2167,11 @@
     let prevGameMode  = null;
     let prevRoundIdx  = null;
     let prevPhase     = null;
+    // Tracks the previous experienceStage so we can detect the single
+    // "new group begins" boundary (entering the Waiting Room) and wipe the
+    // Echo Archive then — NOT on every round, so memory accumulates across
+    // all four rounds of one walkthrough.
+    let prevExperienceStage = null;
 
     function updateFromState(s) {
         gameMode = s.mode || 'live';
@@ -2182,6 +2187,15 @@
         prevGameMode = gameMode;
         prevRoundIdx = s.roundIndex;
         prevPhase    = s.phase;
+
+        // New-session boundary: a fresh group always starts at the Waiting
+        // Room (host "Start new session" sends set_stage: waiting-room). Wipe
+        // the Echo Archive on the transition INTO waiting-room so the next
+        // group's map starts empty — but not on intermediate stage moves.
+        if (prevExperienceStage !== 'waiting-room' && experienceStage === 'waiting-room') {
+            resetSessionArchive();
+        }
+        prevExperienceStage = experienceStage;
 
         // Host lobby: show the server-picked Recommended URL in big text,
         // and list the other detected addresses underneath with markers
@@ -2310,6 +2324,7 @@
             showScreen('threshold');
         } else if (experienceStage === 'archive') {
             showGameHud(false); stopRenderLoop();
+            renderEchoArchive();
             showScreen('archive');
         } else {
             // experienceStage === 'dead-room' — original phase routing
@@ -2861,6 +2876,276 @@
         mainGoalCard.classList.toggle('achieved', goalState.achieved);
     }
 
+    // ============================================================
+    // ---- Session memory (Echo Archive) ----
+    // ============================================================
+    // Lightweight per-session recording that the Stage-4 Archive screen
+    // renders from. NOTHING here touches gameplay or the live canvas — it
+    // is a passive observer that reads the same effective volumes +
+    // normalised positions the render loop already computes, throttled so
+    // it stays cheap even across a full multi-round walkthrough.
+    //
+    // Three memory kinds, all stored in NORMALISED (0..1) room space so the
+    // Archive SVG can remap them into its fixed 540x360 viewBox regardless
+    // of the projector resolution the data was captured at:
+    //   • movement[role] — sampled path points {x, y, vol, t}
+    //   • micro[]        — audible-but-not-loud moments {role, x, y, vol, t}
+    //   • shared[]       — two+ players active AND close {roles, x, y, intensity, t}
+    const SESSION_ARCHIVE_LIMITS = {
+        movementPerRole: 90,    // ~22s of path per role at the sample rate below
+        micro:           120,   // hard cap on stored micro-sound events
+        shared:          48,    // hard cap on stored shared moments
+        movementSampleMs: 250,  // one path point per active player per 250ms
+        microCooldownMs:  220,  // one micro event per active player per 220ms
+        sharedCooldownMs: 600,  // at most one shared moment recorded per 600ms
+        proximityNorm:    0.30,  // normalised distance under which fields "overlap"
+    };
+    const sessionArchive = {
+        startedAt: 0,
+        movement:  { red: [], green: [], blue: [] },
+        micro:     [],
+        shared:    [],
+        lastMoveAt:  { red: 0, green: 0, blue: 0 },
+        lastMicroAt: { red: 0, green: 0, blue: 0 },
+        lastSharedAt: 0,
+        hasData: false,
+    };
+    function resetSessionArchive() {
+        sessionArchive.startedAt   = performance.now();
+        sessionArchive.movement    = { red: [], green: [], blue: [] };
+        sessionArchive.micro       = [];
+        sessionArchive.shared      = [];
+        sessionArchive.lastMoveAt  = { red: 0, green: 0, blue: 0 };
+        sessionArchive.lastMicroAt = { red: 0, green: 0, blue: 0 };
+        sessionArchive.lastSharedAt = 0;
+        sessionArchive.hasData     = false;
+    }
+    resetSessionArchive();
+
+    // Passive recorder — called once per frame from render(). Only records
+    // during the live Dead Room playing phase; in every other stage it is a
+    // near-instant no-op (the guard + a single loop over three roles).
+    function recordSessionArchive() {
+        if (experienceStage !== 'dead-room' || currentPhase !== 'playing') return;
+        const now = performance.now();
+        const L = SESSION_ARCHIVE_LIMITS;
+        const tRel = now - sessionArchive.startedAt;
+        const active = [];   // roles audible THIS frame, with normalised pos
+
+        for (const role of ROLES) {
+            const vol = effectiveVolumeFor(role);
+            if (vol < CONFIG.volumeThresholdVisual) continue;
+            const p = smoothedPositions[role];
+            if (!p) continue;
+            active.push({ role, x: p.x, y: p.y, vol });
+
+            // Movement trace — sampled so the path reads as a smooth route,
+            // not a dense scribble. Oldest point drops when over the cap.
+            if (now - (sessionArchive.lastMoveAt[role] || 0) >= L.movementSampleMs) {
+                sessionArchive.lastMoveAt[role] = now;
+                const arr = sessionArchive.movement[role];
+                arr.push({ x: p.x, y: p.y, vol, t: tRel });
+                if (arr.length > L.movementPerRole) arr.shift();
+                sessionArchive.hasData = true;
+            }
+            // Micro-sound event — any audible moment, however quiet. Its own
+            // (faster) cooldown so soft taps register as distinct specks.
+            if (now - (sessionArchive.lastMicroAt[role] || 0) >= L.microCooldownMs) {
+                sessionArchive.lastMicroAt[role] = now;
+                sessionArchive.micro.push({ role, x: p.x, y: p.y, vol, t: tRel });
+                if (sessionArchive.micro.length > L.micro) sessionArchive.micro.shift();
+                sessionArchive.hasData = true;
+            }
+        }
+
+        // Shared moment — two+ active players whose fields are close. One
+        // moment per cooldown window (the strongest pair wins).
+        if (active.length >= 2 && now - sessionArchive.lastSharedAt >= L.sharedCooldownMs) {
+            let best = null;
+            for (let i = 0; i < active.length; i++) {
+                for (let j = i + 1; j < active.length; j++) {
+                    const a = active[i], b = active[j];
+                    const dx = a.x - b.x, dy = a.y - b.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > L.proximityNorm) continue;
+                    const intensity = Math.min(1, (a.vol + b.vol) * (1 - dist / L.proximityNorm));
+                    if (!best || intensity > best.intensity) {
+                        best = {
+                            roles: [a.role, b.role],
+                            x: (a.x + b.x) / 2,
+                            y: (a.y + b.y) / 2,
+                            intensity,
+                            t: tRel,
+                        };
+                    }
+                }
+            }
+            if (best) {
+                sessionArchive.lastSharedAt = now;
+                sessionArchive.shared.push(best);
+                if (sessionArchive.shared.length > L.shared) sessionArchive.shared.shift();
+                sessionArchive.hasData = true;
+            }
+        }
+    }
+
+    // ---- Archive rendering (Stage 4 screen) ----
+    // Coordinate frame of the Archive SVG: a 540x360 viewBox with the room
+    // drawn as a rounded rect at (40, 30) sized 460x300 — must match the
+    // <rect> the placeholder used so generated traces sit inside the frame.
+    const ARCHIVE_VIEW = { roomX: 40, roomY: 30, roomW: 460, roomH: 300 };
+    const ARCHIVE_RGB = { red: '230, 80, 80', green: '120, 210, 140', blue: '110, 160, 235' };
+    const ARCHIVE_ROLE_NAME = { red: 'Red', green: 'Green', blue: 'Blue' };
+    // Snapshot of the pristine placeholder markup, captured on first render
+    // BEFORE we ever overwrite it — restored verbatim when there's no data.
+    let archivePlaceholderSVG = null;
+
+    function archiveClamp01(v) { return Math.max(0, Math.min(1, v)); }
+    function archiveX(nx) { return ARCHIVE_VIEW.roomX + archiveClamp01(nx) * ARCHIVE_VIEW.roomW; }
+    function archiveY(ny) { return ARCHIVE_VIEW.roomY + archiveClamp01(ny) * ARCHIVE_VIEW.roomH; }
+
+    // Quadratic-midpoint smoothing: draw a Q curve through each point using
+    // the segment midpoints as on-curve anchors. Cheap, and gives recorded
+    // routes an organic "hand-traced" feel rather than a jagged polyline.
+    function buildSmoothPath(pts) {
+        if (!pts.length) return '';
+        if (pts.length === 1) return `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+        let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+        for (let i = 1; i < pts.length - 1; i++) {
+            const mx = (pts[i].x + pts[i + 1].x) / 2;
+            const my = (pts[i].y + pts[i + 1].y) / 2;
+            d += ` Q ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+        }
+        const last = pts[pts.length - 1];
+        d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+        return d;
+    }
+
+    // Total normalised path length for a role — used to pick the "moved
+    // most" colour for the Movement chip.
+    function archivePathLength(pts) {
+        if (!pts || pts.length < 2) return 0;
+        let len = 0;
+        for (let i = 1; i < pts.length; i++) {
+            const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
+            len += Math.sqrt(dx * dx + dy * dy);
+        }
+        return len;
+    }
+
+    // Build the inner SVG markup from the recorded session. Draw order:
+    // room → movement paths → micro clusters → shared glows (on top, screen
+    // blend) so overlapping colours brighten exactly where attention pooled.
+    function buildArchiveSVG() {
+        const V = ARCHIVE_VIEW;
+        let s = '';
+        s += '<defs><pattern id="archiveGrid" width="36" height="36" patternUnits="userSpaceOnUse">'
+           + '<path d="M 36 0 L 0 0 0 36" fill="none" stroke="rgba(200,170,150,0.05)" stroke-width="0.5"/></pattern></defs>';
+        s += `<rect x="${V.roomX}" y="${V.roomY}" width="${V.roomW}" height="${V.roomH}" rx="14" ry="14" `
+           + 'fill="rgba(28,16,11,0.55)" stroke="rgba(160,120,90,0.25)" stroke-width="1.2"/>';
+        s += `<rect x="${V.roomX}" y="${V.roomY}" width="${V.roomW}" height="${V.roomH}" rx="14" ry="14" fill="url(#archiveGrid)"/>`;
+
+        // Movement paths — one smooth trace per role that actually moved.
+        for (const role of ROLES) {
+            const pts = sessionArchive.movement[role];
+            if (!pts || pts.length < 2) continue;
+            const mapped = pts.map(p => ({ x: archiveX(p.x), y: archiveY(p.y) }));
+            const d = buildSmoothPath(mapped);
+            if (!d) continue;
+            s += `<path d="${d}" fill="none" stroke="rgba(${ARCHIVE_RGB[role]},0.55)" `
+               + `stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" `
+               + `class="echo-path echo-path--${role}"/>`;
+        }
+
+        // Micro-sound clusters — small specks scaled by recorded loudness.
+        const microByRole = { red: [], green: [], blue: [] };
+        for (const e of sessionArchive.micro) {
+            if (microByRole[e.role]) microByRole[e.role].push(e);
+        }
+        for (const role of ROLES) {
+            const list = microByRole[role];
+            if (!list.length) continue;
+            s += `<g class="echo-cluster echo-cluster--${role}" fill="rgba(${ARCHIVE_RGB[role]},0.7)">`;
+            for (const e of list) {
+                const r = (1.0 + Math.min(1, e.vol / 0.12) * 1.6).toFixed(1);
+                s += `<circle cx="${archiveX(e.x).toFixed(1)}" cy="${archiveY(e.y).toFixed(1)}" r="${r}"/>`;
+            }
+            s += '</g>';
+        }
+
+        // Shared-moment glows — soft blended circles (screen blend via CSS).
+        if (sessionArchive.shared.length) {
+            s += '<g class="echo-overlap">';
+            for (const m of sessionArchive.shared) {
+                const r = (12 + m.intensity * 16).toFixed(1);
+                const a = (0.12 + m.intensity * 0.14).toFixed(3);
+                s += `<circle cx="${archiveX(m.x).toFixed(1)}" cy="${archiveY(m.y).toFixed(1)}" r="${r}" `
+                   + `fill="rgba(240,210,170,${a})"/>`;
+            }
+            s += '</g>';
+        }
+        return s;
+    }
+
+    function setArchiveChip(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+    function updateArchiveChips() {
+        const microN  = sessionArchive.micro.length;
+        const sharedN = sessionArchive.shared.length;
+        setArchiveChip('archiveChipMicroDesc', microN > 0
+            ? `${microN} small sound${microN === 1 ? '' : 's'} became visible.`
+            : 'Small sounds became visible.');
+
+        let bestRole = null, bestLen = 0;
+        for (const role of ROLES) {
+            const len = archivePathLength(sessionArchive.movement[role]);
+            if (len > bestLen) { bestLen = len; bestRole = role; }
+        }
+        setArchiveChip('archiveChipMotionDesc', (bestRole && bestLen > 0.05)
+            ? `${ARCHIVE_ROLE_NAME[bestRole]} moved through the room the most.`
+            : 'Sound followed bodies.');
+
+        setArchiveChip('archiveChipSharedDesc', sharedN > 0
+            ? `Colours overlapped ${sharedN} time${sharedN === 1 ? '' : 's'}.`
+            : 'Colours overlapped when people listened near each other.');
+    }
+    function resetArchiveChips() {
+        setArchiveChip('archiveChipMicroDesc',  'Small sounds became visible.');
+        setArchiveChip('archiveChipMotionDesc', 'Sound followed bodies.');
+        setArchiveChip('archiveChipSharedDesc', 'Colours overlapped when people listened near each other.');
+    }
+
+    // Render the Archive screen from session memory. Falls back to the
+    // pristine placeholder SVG (captured on first call) when no data exists.
+    function renderEchoArchive() {
+        const mapEl  = document.getElementById('archiveMap');
+        const svgEl  = document.getElementById('archiveSvg');
+        const hintEl = document.getElementById('archiveTraceHint');
+        if (!mapEl || !svgEl) return;
+        if (archivePlaceholderSVG === null) archivePlaceholderSVG = svgEl.innerHTML;
+
+        if (!sessionArchive.hasData) {
+            svgEl.innerHTML = archivePlaceholderSVG;
+            mapEl.setAttribute('data-archive-source', 'placeholder');
+            if (hintEl) {
+                hintEl.textContent = 'Placeholder map — real session trace will replace this when recording is enabled.';
+                hintEl.classList.add('archive-trace-hint--placeholder');
+            }
+            resetArchiveChips();
+            return;
+        }
+
+        svgEl.innerHTML = buildArchiveSVG();
+        mapEl.setAttribute('data-archive-source', 'session');
+        if (hintEl) {
+            hintEl.textContent = 'This map was generated from your group’s last session.';
+            hintEl.classList.remove('archive-trace-hint--placeholder');
+        }
+        updateArchiveChips();
+    }
+
     // ---- Render Loop ----
     function startRenderLoop() {
         if (!animationId) {
@@ -2984,6 +3269,12 @@
             v.x += (dvx - v.x) * VELOCITY_SMOOTH;
             v.y += (dvy - v.y) * VELOCITY_SMOOTH;
         }
+
+        // ---- Session memory recorder (Echo Archive) ----
+        // Passive: reads the effective volumes + freshly-lerped normalised
+        // positions above and stores throttled movement / micro-sound /
+        // shared-moment samples. No-op outside the live playing phase.
+        recordSessionArchive();
 
         // ---- Trace-event memory layer (Fill Mode) ----
         // In Fill Mode: spawn paint traces at PAINT_TRACE.cooldownMs per

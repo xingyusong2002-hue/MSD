@@ -609,8 +609,8 @@ ngrok http 8080</code></pre>
                  the path "passed through". Overlap regions use
                  mix-blend-mode: screen on coloured circles to produce
                  the subtle blended glow without any JS. -->
-            <div class="echo-memory-map" data-archive-source="placeholder" aria-label="Echo Memory Map">
-                <svg viewBox="0 0 540 360" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true">
+            <div id="archiveMap" class="echo-memory-map" data-archive-source="placeholder" aria-label="Echo Memory Map">
+                <svg id="archiveSvg" viewBox="0 0 540 360" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true">
                     <!-- Faint top-view room outline + subtle grid -->
                     <defs>
                         <pattern id="archiveGrid" width="36" height="36" patternUnits="userSpaceOnUse">
@@ -675,7 +675,7 @@ ngrok http 8080</code></pre>
                         <circle cx="118" cy="282" r="16" fill="rgba(200,210,220,0.16)"/>
                     </g>
                 </svg>
-                <p class="archive-trace-hint archive-trace-hint--placeholder">
+                <p id="archiveTraceHint" class="archive-trace-hint archive-trace-hint--placeholder">
                     Placeholder map — real session trace will replace this when recording is enabled.
                 </p>
             </div>
@@ -686,21 +686,21 @@ ngrok http 8080</code></pre>
                     <span class="archive-chip-dot archive-chip-dot--micro"></span>
                     <div>
                         <div class="archive-chip-label">Micro sounds</div>
-                        <div class="archive-chip-desc">Small sounds became visible.</div>
+                        <div id="archiveChipMicroDesc" class="archive-chip-desc">Small sounds became visible.</div>
                     </div>
                 </div>
                 <div class="archive-chip" role="listitem">
                     <span class="archive-chip-dot archive-chip-dot--motion"></span>
                     <div>
                         <div class="archive-chip-label">Movement traces</div>
-                        <div class="archive-chip-desc">Sound followed bodies.</div>
+                        <div id="archiveChipMotionDesc" class="archive-chip-desc">Sound followed bodies.</div>
                     </div>
                 </div>
                 <div class="archive-chip" role="listitem">
                     <span class="archive-chip-dot archive-chip-dot--shared"></span>
                     <div>
                         <div class="archive-chip-label">Shared moments</div>
-                        <div class="archive-chip-desc">Colours overlapped when people listened near each other.</div>
+                        <div id="archiveChipSharedDesc" class="archive-chip-desc">Colours overlapped when people listened near each other.</div>
                     </div>
                 </div>
             </div>
